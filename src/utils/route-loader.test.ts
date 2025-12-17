@@ -1,8 +1,9 @@
-import { describe, test, expect, beforeEach, mock } from 'bun:test';
+import { describe, test, expect, beforeEach } from 'bun:test';
 import Fastify, { FastifyInstance } from 'fastify';
-import { Controller, Get, Post, Put, Delete, ROUTE_METADATA } from '../decorators/controller';
+import { Controller, Get, Post, Put, ROUTE_METADATA } from '../decorators/controller';
 import { Body, Query, Params, User, PARAM_METADATA } from '../decorators/params';
 import { registerControllers } from './route-loader';
+import '../types'; // 导入 Fastify 类型扩展
 
 describe('Route Loader', () => {
   let app: FastifyInstance;

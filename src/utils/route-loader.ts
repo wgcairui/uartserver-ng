@@ -6,6 +6,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { ROUTE_METADATA, type ControllerMetadata } from '../decorators/controller';
 import { PARAM_METADATA, type ParamMetadata } from '../decorators/params';
+import '../types'; // 导入 Fastify 类型扩展
 
 /**
  * Controller 构造函数类型
@@ -152,7 +153,7 @@ function extractParameters(
  */
 function extractParameter(
   request: FastifyRequest,
-  reply: FastifyReply,
+  _reply: FastifyReply,
   param: ParamMetadata
 ): any {
   switch (param.type) {

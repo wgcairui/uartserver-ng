@@ -29,7 +29,11 @@ export const PARAM_METADATA = new Map<Function, Map<string, ParamMetadata[]>>();
  */
 function createParamDecorator(type: ParamType) {
   return function (propertyKey?: string): ParameterDecorator {
-    return function (target: any, methodName: string | symbol, parameterIndex: number) {
+    return function (target: any, methodName: string | symbol | undefined, parameterIndex: number) {
+      if (!methodName) {
+        throw new Error('参数装饰器必须应用在方法参数上');
+      }
+
       const constructor = target.constructor;
 
       // 获取或创建 Controller 的参数元数据

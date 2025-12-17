@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { Body, Query, Params, User, PARAM_METADATA } from './params';
-import { Controller, Get, Post } from './controller';
+import { Controller, Post } from './controller';
 
 describe('Parameter Decorators', () => {
   beforeEach(() => {
@@ -258,9 +258,9 @@ describe('Parameter Decorators', () => {
       expect(metadata?.get('get')).toHaveLength(1);
       expect(metadata?.get('create')).toHaveLength(1);
 
-      expect(metadata?.get('list')?.[0].type).toBe('query');
-      expect(metadata?.get('get')?.[0].type).toBe('params');
-      expect(metadata?.get('create')?.[0].type).toBe('body');
+      expect(metadata?.get('list')?.[0]?.type).toBe('query');
+      expect(metadata?.get('get')?.[0]?.type).toBe('params');
+      expect(metadata?.get('create')?.[0]?.type).toBe('body');
     });
 
     test('should clear metadata correctly', () => {
