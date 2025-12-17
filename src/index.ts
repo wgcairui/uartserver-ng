@@ -10,6 +10,7 @@ import { mongodb } from './database/mongodb';
 import { IndexManager } from './services/index-manager';
 import { registerControllers } from './utils/route-loader';
 import { TerminalController } from './controllers/terminal.controller';
+import { socketService } from './services/socket.service';
 
 /**
  * 创建并配置 Fastify 应用
@@ -99,6 +100,11 @@ async function start() {
       host: config.HOST,
     });
 
+    // 4. 初始化 Socket.IO
+    console.log('🔌 正在初始化 Socket.IO...');
+    socketService.initialize(app.server);
+    console.log('✅ Socket.IO 初始化完成\n');
+
     console.log(`
 ╔═══════════════════════════════════════════════════════════╗
 ║                                                           ║
@@ -114,6 +120,9 @@ async function start() {
 ║      POST /api/terminal/queryData - 设备数据上报         ║
 ║      POST /api/terminal/status    - 处理状态查询         ║
 ║                                                           ║
+║   🔌  Socket.IO Namespace:                               ║
+║      /node                     - Node 客户端连接         ║
+║                                                           ║
 ╚═══════════════════════════════════════════════════════════╝
 `);
 
@@ -127,7 +136,12 @@ async function start() {
         await app.close();
         console.log('✅ Fastify 服务已关闭');
 
-        // 2. 关闭数据库连接
+        // 2. 关闭 Socket.IO 连接
+        console.log('🔌 正在关闭 Socket.IO...');
+        await socketService.close();
+        console.log('✅ Socket.IO 已关闭');
+
+        // 3. 关闭数据库连接
         console.log('📦 正在关闭数据库连接...');
         await mongodb.disconnect();
         console.log('✅ MongoDB 连接已关闭');
