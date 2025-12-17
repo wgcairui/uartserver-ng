@@ -192,3 +192,4 @@ MIT
 
 **🎉 Built with ❤️ using Bun + Fastify**
 # uartserver-ng
+# uartserver-ng
