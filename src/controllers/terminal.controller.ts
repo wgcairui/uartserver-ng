@@ -36,10 +36,10 @@ export class TerminalController {
       // 1. 快速数据验证 (<1ms)
       const result = QueryResultSchema.safeParse(data);
       if (!result.success) {
-        console.error('数据验证失败:', result.error.errors);
+        console.error('数据验证失败:', result.error.issues);
         return {
           status: 'error',
-          message: `数据验证失败: ${result.error.errors[0]?.message || '未知错误'}`,
+          message: `数据验证失败: ${result.error.issues[0]?.message || '未知错误'}`,
         };
       }
 

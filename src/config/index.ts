@@ -102,7 +102,7 @@ function loadEnv(): Env {
   } catch (error) {
     if (error instanceof z.ZodError) {
       console.error('环境变量验证失败:');
-      error.errors.forEach(err => {
+      error.issues.forEach(err => {
         console.error(`  - ${err.path.join('.')}: ${err.message}`);
       });
       throw new Error('环境变量配置错误，请检查 .env 文件');
