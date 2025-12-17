@@ -6,7 +6,7 @@
 import { mongodb } from '../database/mongodb';
 import { terminalService } from '../services/terminal.service';
 import { nodeService } from '../services/node.service';
-import type { Terminal, NodeClient, MountDevice } from '../types/entities';
+import type { Terminal, NodeClient } from '../types/entities';
 
 interface ValidationResult {
   collection: string;
@@ -178,16 +178,19 @@ async function analyzeData() {
   ]).toArray();
 
   const stats = terminalStats[0];
-  console.log('\n  终端设备:');
-  console.log(`    总数: ${stats.total[0]?.count || 0}`);
-  console.log(`    在线: ${stats.online[0]?.count || 0}`);
-  console.log(`    离线: ${stats.offline[0]?.count || 0}`);
-  console.log(`    有挂载设备: ${stats.withMountDevs[0]?.count || 0}`);
 
-  console.log('\n  协议分布:');
-  stats.protocols.slice(0, 10).forEach((p: any) => {
-    console.log(`    ${p._id}: ${p.count}`);
-  });
+  if (stats) {
+    console.log('\n  终端设备:');
+    console.log(`    总数: ${stats.total[0]?.count || 0}`);
+    console.log(`    在线: ${stats.online[0]?.count || 0}`);
+    console.log(`    离线: ${stats.offline[0]?.count || 0}`);
+    console.log(`    有挂载设备: ${stats.withMountDevs[0]?.count || 0}`);
+
+    console.log('\n  协议分布:');
+    stats.protocols.slice(0, 10).forEach((p: any) => {
+      console.log(`    ${p._id}: ${p.count}`);
+    });
+  }
 
   // 用户统计
   const userCount = await mongodb.getCollection('users').countDocuments();

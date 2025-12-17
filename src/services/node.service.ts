@@ -66,6 +66,32 @@ export class NodeService {
   }
 
   /**
+   * 创建或更新 Node 客户端（返回完整对象）
+   * @param node - Node 客户端数据
+   * @returns 创建或更新后的 Node 客户端
+   */
+  async createOrUpdateNode(
+    node: Omit<NodeClient, '_id'>
+  ): Promise<NodeClient> {
+    if (!node.Name) {
+      throw new Error('Name 字段必填');
+    }
+
+    await this.collection.updateOne(
+      { Name: node.Name },
+      { $set: node },
+      { upsert: true }
+    );
+
+    const result = await this.collection.findOne({ Name: node.Name });
+    if (!result) {
+      throw new Error(`Failed to create/update node: ${node.Name}`);
+    }
+
+    return result;
+  }
+
+  /**
    * 删除 Node 客户端
    * @param name - 节点名称
    * @returns 是否成功

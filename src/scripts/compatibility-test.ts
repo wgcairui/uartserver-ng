@@ -53,9 +53,12 @@ async function testTerminalService() {
 
     if (terminals.length === 0) throw new Error('没有在线终端');
 
-    const result = await terminalService.getTerminal(terminals[0].DevMac);
+    const firstTerminal = terminals[0];
+    if (!firstTerminal) throw new Error('终端数据不存在');
+
+    const result = await terminalService.getTerminal(firstTerminal.DevMac);
     if (!result) throw new Error('未返回终端数据');
-    if (result.DevMac !== terminals[0].DevMac) throw new Error('MAC 地址不匹配');
+    if (result.DevMac !== firstTerminal.DevMac) throw new Error('MAC 地址不匹配');
   });
 
   // 2. getTerminals - 批量获取
@@ -201,9 +204,12 @@ async function testNodeService() {
 
     if (nodes.length === 0) throw new Error('没有节点数据');
 
-    const result = await nodeService.getNodeByName(nodes[0].Name);
+    const firstNode = nodes[0];
+    if (!firstNode) throw new Error('节点数据不存在');
+
+    const result = await nodeService.getNodeByName(firstNode.Name);
     if (!result) throw new Error('未返回节点数据');
-    if (result.Name !== nodes[0].Name) throw new Error('节点名称不匹配');
+    if (result.Name !== firstNode.Name) throw new Error('节点名称不匹配');
   });
 
   // 3. getNodeByIP - 通过 IP 获取节点
@@ -215,9 +221,12 @@ async function testNodeService() {
 
     if (nodes.length === 0) throw new Error('没有节点数据');
 
-    const result = await nodeService.getNodeByIP(nodes[0].IP);
+    const firstNode = nodes[0];
+    if (!firstNode) throw new Error('节点数据不存在');
+
+    const result = await nodeService.getNodeByIP(firstNode.IP);
     if (!result) throw new Error('未返回节点数据');
-    if (result.IP !== nodes[0].IP) throw new Error('IP 地址不匹配');
+    if (result.IP !== firstNode.IP) throw new Error('IP 地址不匹配');
   });
 }
 
