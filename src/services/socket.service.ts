@@ -132,7 +132,7 @@ export class SocketService {
           IP: node.IP,
           Port: node.Port,
           MaxConnections: node.MaxConnections,
-          Connections: node.Connections,
+          Connections: node.Connections ?? 0,
         });
       }
     });

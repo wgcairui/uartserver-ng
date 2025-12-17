@@ -5,6 +5,9 @@
 
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import rateLimit from '@fastify/rate-limit';
+import helmet from '@fastify/helmet';
+import errorHandler from './plugins/error-handler';
 import { config } from './config';
 import { mongodb } from './database/mongodb';
 import { IndexManager } from './services/index-manager';
@@ -36,10 +39,66 @@ async function createApp() {
     trustProxy: true,
   });
 
-  // 注册 CORS
+  // 注册安全相关插件
+
+  // 1. Helmet - 设置安全响应头
+  await app.register(helmet, {
+    // Socket.IO 需要允许的 CSP 设置
+    contentSecurityPolicy: config.NODE_ENV === 'production' ? undefined : false,
+  });
+
+  // 2. CORS - 跨域资源共享
   await app.register(cors, {
-    origin: true, // 允许所有来源
+    origin:
+      config.NODE_ENV === 'production'
+        ? (origin, cb) => {
+            // 生产环境：只允许白名单域名
+            const allowedOrigins = [
+              'http://localhost:3000',
+              'http://localhost:9010',
+              // 在这里添加实际的生产域名
+              // 'https://yourdomain.com',
+            ];
+
+            if (!origin || allowedOrigins.includes(origin)) {
+              cb(null, true);
+            } else {
+              cb(new Error('Not allowed by CORS'), false);
+            }
+          }
+        : true, // 开发环境：允许所有来源
     credentials: true,
+  });
+
+  // 3. Rate Limiting - 请求限流
+  // @ts-expect-error - skip is a valid option but not in type definitions
+  await app.register(rateLimit, {
+    max: config.NODE_ENV === 'production' ? 100 : 1000, // 生产环境更严格
+    timeWindow: '1 minute',
+    cache: 10000, // 缓存 10000 个不同的客户端
+    allowList: ['127.0.0.1'], // 本地请求不限流
+    skipOnError: true, // 如果限流器出错，不要阻止请求
+    redis: undefined, // 可以配置 Redis 用于分布式限流
+    skip: (req: { url?: string }) => {
+      // 排除设备数据上报 API（高频请求，不应被限流）
+      return req.url === '/api/terminal/queryData';
+    },
+    onExceeded: (req) => {
+      app.log.warn(`Rate limit exceeded for ${req.ip} on ${req.url}`);
+    },
+    errorResponseBuilder: () => {
+      return {
+        statusCode: 429,
+        error: 'Too Many Requests',
+        message: 'Rate limit exceeded, please try again later',
+      };
+    },
+  });
+
+  // 4. Error Handler - 统一错误处理
+  await app.register(errorHandler, {
+    includeStack: config.NODE_ENV === 'development',
+    logErrors: true,
   });
 
   // 健康检查端点

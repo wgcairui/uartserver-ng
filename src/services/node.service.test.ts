@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { mongodb } from '../database/mongodb';
-import { nodeService, NodeService } from './node.service';
+import { nodeService } from './node.service';
 
 describe('NodeService', () => {
   beforeAll(async () => {

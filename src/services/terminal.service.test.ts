@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { mongodb } from '../database/mongodb';
-import { terminalService, Terminal, MountDevice } from './terminal.service';
+import { terminalService } from './terminal.service';
+import type { Terminal, MountDevice } from '../types/entities';
 
 describe('TerminalService', () => {
   const testMac = 'AA:BB:CC:DD:EE:FF';
@@ -26,7 +27,7 @@ describe('TerminalService', () => {
     });
 
     test('should return terminal when it exists', async () => {
-      const testTerminal: Terminal = {
+      const testTerminal: Partial<Terminal> & { DevMac: string } = {
         DevMac: 'test_terminal_001',
         name: 'Test Terminal',
         mountNode: 'node1',
@@ -36,6 +37,8 @@ describe('TerminalService', () => {
             pid: 1,
             protocol: 'modbus',
             Type: 'sensor',
+            mountDev: 'test_device',
+            minQueryLimit: 5000,
             online: true,
           },
         ],
@@ -50,7 +53,7 @@ describe('TerminalService', () => {
     });
 
     test('should update pesiv protocol device online status', async () => {
-      const terminal: Terminal = {
+      const terminal: Partial<Terminal> & { DevMac: string } = {
         DevMac: 'test_pesiv_terminal',
         name: 'Pesiv Test',
         mountNode: 'node1',
@@ -60,6 +63,8 @@ describe('TerminalService', () => {
             pid: 1,
             protocol: 'pesiv',
             Type: 'device',
+            mountDev: 'pesiv_device',
+            minQueryLimit: 5000,
             online: false,
           },
         ],
@@ -101,8 +106,20 @@ describe('TerminalService', () => {
   describe('getMountDevice', () => {
     test('should return mount device when exists', async () => {
       const mountDevs: MountDevice[] = [
-        { pid: 1, protocol: 'modbus', Type: 'sensor' },
-        { pid: 2, protocol: 'dlt645', Type: 'meter' },
+        {
+          pid: 1,
+          protocol: 'modbus',
+          Type: 'sensor',
+          mountDev: 'sensor_001',
+          minQueryLimit: 5000,
+        },
+        {
+          pid: 2,
+          protocol: 'dlt645',
+          Type: 'meter',
+          mountDev: 'meter_001',
+          minQueryLimit: 5000,
+        },
       ];
 
       await terminalService.upsertTerminal({
@@ -161,7 +178,16 @@ describe('TerminalService', () => {
         name: 'Mount Status Test',
         mountNode: 'node1',
         online: true,
-        mountDevs: [{ pid: 1, protocol: 'modbus', Type: 'sensor', online: false }],
+        mountDevs: [
+          {
+            pid: 1,
+            protocol: 'modbus',
+            Type: 'sensor',
+            mountDev: 'test_device',
+            minQueryLimit: 5000,
+            online: false,
+          },
+        ],
       });
 
       const updated = await terminalService.updateMountDeviceOnlineStatus(
@@ -208,7 +234,7 @@ describe('TerminalService', () => {
 
   describe('upsertTerminal', () => {
     test('should create new terminal', async () => {
-      const newTerminal: Terminal = {
+      const newTerminal: Partial<Terminal> & { DevMac: string } = {
         DevMac: 'test_new_terminal',
         name: 'New Terminal',
         mountNode: 'node1',

@@ -1,41 +1,17 @@
 /**
  * Terminal Service
  * 终端设备管理服务
+ * 完全兼容老系统数据模型
  */
 
 import { mongodb } from '../database/mongodb';
 import { Collection } from 'mongodb';
-
-/**
- * 挂载设备信息
- */
-export interface MountDevice {
-  pid: number; // 设备 PID
-  protocol: string; // 协议类型
-  name?: string; // 设备名称
-  Type: string; // 设备型号
-  online?: boolean; // 在线状态
-  mountData?: string; // 挂载数据
-  bindDev?: string; // 绑定设备MAC
-}
-
-/**
- * 终端设备文档结构
- */
-export interface Terminal {
-  _id?: any;
-  DevMac: string; // 设备 MAC 地址
-  name: string; // 设备名称
-  mountNode: string; // 挂载节点
-  online: boolean; // 在线状态
-  ICCID?: string; // SIM 卡 ICCID
-  ownerId?: string; // 所有者 ID
-  mountDevs?: MountDevice[]; // 挂载的设备列表
-  AT?: string; // AT 指令
-  UT?: Date; // 最后更新时间
-  jw?: { lon: number; lat: number }; // 经纬度
-  [key: string]: any; // 其他扩展字段
-}
+import type {
+  Terminal,
+  MountDevice,
+  TerminalUpdate,
+  TerminalFilter,
+} from '../types/entities';
 
 /**
  * 终端服务类
@@ -76,7 +52,20 @@ export class TerminalService {
       .find({ DevMac: { $in: macs } })
       .toArray();
 
-    terminals.forEach(terminal => this.updateTerminalOnlineStatus(terminal));
+    terminals.forEach((terminal) => this.updateTerminalOnlineStatus(terminal));
+
+    return terminals;
+  }
+
+  /**
+   * 根据过滤条件查询终端
+   * @param filter - 查询过滤器
+   * @returns 终端数组
+   */
+  async findTerminals(filter: TerminalFilter): Promise<Terminal[]> {
+    const terminals = await this.collection.find(filter).toArray();
+
+    terminals.forEach((terminal) => this.updateTerminalOnlineStatus(terminal));
 
     return terminals;
   }
@@ -108,7 +97,7 @@ export class TerminalService {
     pid: number
   ): Promise<MountDevice | undefined> {
     const terminal = await this.getTerminal(mac);
-    return terminal?.mountDevs?.find(dev => dev.pid === pid);
+    return terminal?.mountDevs?.find((dev) => dev.pid === pid);
   }
 
   /**
@@ -120,7 +109,7 @@ export class TerminalService {
   async updateOnlineStatus(mac: string, online: boolean): Promise<boolean> {
     const result = await this.collection.updateOne(
       { DevMac: mac },
-      { $set: { online, UT: new Date() } }
+      { $set: { online, uptime: new Date() } }
     );
 
     return result.modifiedCount > 0;
@@ -140,7 +129,13 @@ export class TerminalService {
   ): Promise<boolean> {
     const result = await this.collection.updateOne(
       { DevMac: mac, 'mountDevs.pid': pid },
-      { $set: { 'mountDevs.$.online': online, UT: new Date() } }
+      {
+        $set: {
+          'mountDevs.$.online': online,
+          'mountDevs.$.lastRecord': new Date(),
+          uptime: new Date(),
+        },
+      }
     );
 
     return result.modifiedCount > 0;
@@ -183,18 +178,82 @@ export class TerminalService {
    * @param terminal - 终端数据
    * @returns 是否成功
    */
-  async upsertTerminal(terminal: Partial<Terminal>): Promise<boolean> {
+  async upsertTerminal(terminal: TerminalUpdate & { DevMac: string }): Promise<boolean> {
     if (!terminal.DevMac) {
       throw new Error('DevMac 字段必填');
     }
 
     const result = await this.collection.updateOne(
       { DevMac: terminal.DevMac },
-      { $set: { ...terminal, UT: new Date() } },
+      {
+        $set: {
+          ...terminal,
+          uptime: new Date(),
+          updatedAt: new Date(),
+        },
+      },
       { upsert: true }
     );
 
     return result.acknowledged;
+  }
+
+  /**
+   * 更新终端字段
+   * @param mac - 终端 MAC
+   * @param update - 要更新的字段
+   * @returns 是否成功
+   */
+  async updateTerminal(mac: string, update: TerminalUpdate): Promise<boolean> {
+    const result = await this.collection.updateOne(
+      { DevMac: mac },
+      {
+        $set: {
+          ...update,
+          updatedAt: new Date(),
+        },
+      }
+    );
+
+    return result.modifiedCount > 0;
+  }
+
+  /**
+   * 删除终端
+   * @param mac - 终端 MAC
+   * @returns 是否成功
+   */
+  async deleteTerminal(mac: string): Promise<boolean> {
+    const result = await this.collection.deleteOne({ DevMac: mac });
+    return result.deletedCount > 0;
+  }
+
+  /**
+   * 更新终端 ICCID 信息
+   * @param mac - 终端 MAC
+   * @param iccidInfo - ICCID 信息（部分字段）
+   * @returns 是否成功
+   */
+  async updateIccidInfo(
+    mac: string,
+    iccidInfo: Partial<Terminal['iccidInfo']>
+  ): Promise<boolean> {
+    // 使用点表示法更新嵌套字段
+    const updateFields: Record<string, any> = {
+      updatedAt: new Date(),
+    };
+
+    // 为每个 iccidInfo 字段添加点表示法
+    Object.entries(iccidInfo).forEach(([key, value]) => {
+      updateFields[`iccidInfo.${key}`] = value;
+    });
+
+    const result = await this.collection.updateOne(
+      { DevMac: mac },
+      { $set: updateFields }
+    );
+
+    return result.modifiedCount > 0;
   }
 }
 

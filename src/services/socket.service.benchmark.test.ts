@@ -333,7 +333,11 @@ describe('SocketService Performance Benchmarks', () => {
       const startTime = performance.now();
 
       // 模拟从一个客户端发送 terminalOn 事件
-      clients[0].emit('terminalOn', 'AA:BB:CC:DD:EE:FF', false);
+      const firstClient = clients[0];
+      if (!firstClient) {
+        throw new Error('No client connected');
+      }
+      firstClient.emit('terminalOn', 'AA:BB:CC:DD:EE:FF', false);
 
       // 等待所有客户端接收（这个测试实际上测试的是服务器处理速度）
       // 注意：terminalOn 事件不是广播事件，这里只是测试服务器处理速度
@@ -432,7 +436,10 @@ describe('SocketService Performance Benchmarks', () => {
 
       // 断开 5 个
       for (let i = 0; i < 5; i++) {
-        clients[i].disconnect();
+        const client = clients[i];
+        if (client) {
+          client.disconnect();
+        }
       }
       await new Promise((r) => setTimeout(r, 200));
 
@@ -442,7 +449,10 @@ describe('SocketService Performance Benchmarks', () => {
 
       // 断开剩余的
       for (let i = 5; i < 10; i++) {
-        clients[i].disconnect();
+        const client = clients[i];
+        if (client) {
+          client.disconnect();
+        }
       }
       await new Promise((r) => setTimeout(r, 200));
 

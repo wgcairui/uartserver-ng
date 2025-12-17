@@ -98,6 +98,26 @@ function loadEnv(): Env {
   try {
     // Bun 自动加载 .env 文件到 process.env
     const parsed = envSchema.parse(process.env);
+
+    // 生产环境安全检查
+    if (parsed.NODE_ENV === 'production') {
+      // 检查 JWT Secret 是否使用默认值
+      if (parsed.JWT_SECRET.includes('change-this')) {
+        throw new Error(
+          '🚨 安全错误: 生产环境不能使用默认的 JWT_SECRET！\n' +
+          '   请在环境变量或 .env 文件中设置一个强密钥。\n' +
+          '   建议使用至少 32 个字符的随机字符串。'
+        );
+      }
+
+      // 检查 JWT Secret 长度
+      if (parsed.JWT_SECRET.length < 32) {
+        console.warn(
+          '⚠️  警告: JWT_SECRET 长度少于 32 个字符，建议使用更长的密钥以提高安全性。'
+        );
+      }
+    }
+
     return parsed;
   } catch (error) {
     if (error instanceof z.ZodError) {

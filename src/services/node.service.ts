@@ -1,11 +1,12 @@
 /**
  * Node Client Service
  * Node 客户端管理服务 - 管理远程 UART 服务器节点的注册和配置
+ * 完全兼容老系统数据模型
  */
 
 import { mongodb } from '../database/mongodb';
 import { Collection } from 'mongodb';
-import { NodeClient } from '../types/socket.types';
+import type { NodeClient } from '../types/entities';
 
 /**
  * Node 客户端服务类
