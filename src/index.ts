@@ -7,6 +7,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import helmet from '@fastify/helmet';
+import fastifySocketIO from 'fastify-socket.io';
 import errorHandler from './plugins/error-handler';
 import { config } from './config';
 import { mongodb } from './database/mongodb';
@@ -14,6 +15,7 @@ import { IndexManager } from './services/index-manager';
 import { registerControllers } from './utils/route-loader';
 import { TerminalController } from './controllers/terminal.controller';
 import { socketService } from './services/socket.service';
+import { socketIoService } from './services/socket-io.service';
 
 /**
  * 创建并配置 Fastify 应用
@@ -101,6 +103,20 @@ async function createApp() {
     logErrors: true,
   });
 
+  // 5. Socket.IO - 实时通信
+  await app.register(fastifySocketIO, {
+    cors: {
+      origin:
+        config.NODE_ENV === 'production'
+          ? ['http://localhost:3000', 'http://localhost:9010']
+          : '*',
+      credentials: true,
+    },
+    transports: ['websocket', 'polling'],
+    pingTimeout: 60000, // 60s ping timeout
+    pingInterval: 25000, // 25s ping interval
+  });
+
   // 健康检查端点
   app.get('/health', async () => {
     const dbHealthy = await mongodb.healthCheck();
@@ -159,10 +175,15 @@ async function start() {
       host: config.HOST,
     });
 
-    // 4. 初始化 Socket.IO
-    console.log('🔌 正在初始化 Socket.IO...');
+    // 4. 初始化 Socket.IO (Node 客户端)
+    console.log('🔌 正在初始化 Socket.IO (Node 客户端)...');
+    socketIoService.initialize(app.io);
+    console.log('✅ Socket.IO (Node 客户端) 初始化完成');
+
+    // 5. 初始化 WebSocket (浏览器客户端)
+    console.log('🔌 正在初始化 WebSocket (浏览器客户端)...');
     socketService.initialize(app.server);
-    console.log('✅ Socket.IO 初始化完成\n');
+    console.log('✅ WebSocket (浏览器客户端) 初始化完成\n');
 
     console.log(`
 ╔═══════════════════════════════════════════════════════════╗
@@ -195,10 +216,13 @@ async function start() {
         await app.close();
         console.log('✅ Fastify 服务已关闭');
 
-        // 2. 关闭 Socket.IO 连接
+        // 2. 关闭 Socket.IO 和 WebSocket 连接
         console.log('🔌 正在关闭 Socket.IO...');
+        socketIoService.cleanup();
+        console.log('✅ Socket.IO (Node 客户端) 已关闭');
+
         await socketService.close();
-        console.log('✅ Socket.IO 已关闭');
+        console.log('✅ WebSocket (浏览器客户端) 已关闭');
 
         // 3. 关闭数据库连接
         console.log('📦 正在关闭数据库连接...');

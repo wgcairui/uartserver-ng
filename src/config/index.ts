@@ -33,6 +33,9 @@ const envSchema = z.object({
   // JWT
   JWT_SECRET: z.string().default('your-super-secret-jwt-key-change-this-in-production'),
 
+  // Node Client Authentication
+  NODE_SECRET: z.string().default('your-node-client-secret-change-this-in-production'),
+
   // Logging
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   LOG_PRETTY: z.string().default('true').transform(val => val === 'true'),
@@ -114,6 +117,22 @@ function loadEnv(): Env {
       if (parsed.JWT_SECRET.length < 32) {
         console.warn(
           '⚠️  警告: JWT_SECRET 长度少于 32 个字符，建议使用更长的密钥以提高安全性。'
+        );
+      }
+
+      // 检查 Node Secret 是否使用默认值
+      if (parsed.NODE_SECRET.includes('change-this')) {
+        throw new Error(
+          '🚨 安全错误: 生产环境不能使用默认的 NODE_SECRET！\n' +
+          '   请在环境变量或 .env 文件中设置一个强密钥用于 Node 客户端认证。\n' +
+          '   建议使用至少 32 个字符的随机字符串。'
+        );
+      }
+
+      // 检查 Node Secret 长度
+      if (parsed.NODE_SECRET.length < 32) {
+        console.warn(
+          '⚠️  警告: NODE_SECRET 长度少于 32 个字符，建议使用更长的密钥以提高安全性。'
         );
       }
     }
