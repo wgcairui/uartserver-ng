@@ -142,6 +142,54 @@ export class TerminalService {
   }
 
   /**
+   * 更新挂载设备 lastEmit 时间戳（查询发送时间）
+   * @param mac - 终端 MAC
+   * @param pid - 设备 PID
+   * @param time - 发送时间
+   * @returns 是否更新成功
+   */
+  async updateMountDeviceLastEmit(
+    mac: string,
+    pid: number,
+    time: Date
+  ): Promise<boolean> {
+    const result = await this.collection.updateOne(
+      { DevMac: mac, 'mountDevs.pid': pid },
+      {
+        $set: {
+          'mountDevs.$.lastEmit': time,
+        },
+      }
+    );
+
+    return result.modifiedCount > 0;
+  }
+
+  /**
+   * 更新挂载设备 lastRecord 时间戳（查询响应时间）
+   * @param mac - 终端 MAC
+   * @param pid - 设备 PID
+   * @param time - 响应时间
+   * @returns 是否更新成功
+   */
+  async updateMountDeviceLastRecord(
+    mac: string,
+    pid: number,
+    time: Date
+  ): Promise<boolean> {
+    const result = await this.collection.updateOne(
+      { DevMac: mac, 'mountDevs.pid': pid },
+      {
+        $set: {
+          'mountDevs.$.lastRecord': time,
+        },
+      }
+    );
+
+    return result.modifiedCount > 0;
+  }
+
+  /**
    * 获取所有在线终端
    * @returns 在线终端列表
    */

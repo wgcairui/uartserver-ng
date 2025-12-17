@@ -27,6 +27,7 @@ import type { Terminal } from '../types/entities/terminal.entity';
 import { nodeService } from './node.service';
 import { terminalService } from './terminal.service';
 import { protocolService, type Protocol } from './protocol.service';
+import { resultService } from './result.service';
 import { logger } from '../utils/logger';
 import { config } from '../config';
 
@@ -483,7 +484,7 @@ class SocketIoService extends EventEmitter {
   /**
    * 处理查询结果
    */
-  private handleQueryResult(
+  private async handleQueryResult(
     _socket: Socket<
       NodeClientToServerEvents,
       ServerToNodeClientEvents,
@@ -491,13 +492,59 @@ class SocketIoService extends EventEmitter {
       SocketData
     >,
     data: QueryResultRequest
-  ): void {
+  ): Promise<void> {
     // 触发内部事件 (用于 Promise 解析)
     this.emit(data.eventName, data);
 
     logger.debug(
-      `Query result received: ${data.mac}:${data.pid}, success: ${data.success}`
+      `Query result received: ${data.mac}/${data.pid}, success: ${data.success}, useTime: ${data.useTime}ms`
     );
+
+    // 处理成功的查询结果
+    if (data.success && data.data) {
+      try {
+        // 获取查询间隔（从 queryCache 或使用默认值）
+        const queryCacheKey = `${data.mac}${data.pid}`;
+        const queryCache = this.queryCache.get(queryCacheKey);
+        const interval = queryCache?.Interval ?? 5000; // 默认 5000ms
+
+        // 1. 存储结果到 MongoDB（必须先完成）
+        await resultService.saveQueryResult({
+          mac: data.mac,
+          pid: data.pid,
+          result: data.data.result,
+          timeStamp: data.data.timeStamp,
+          useTime: data.data.useTime,
+          parentId: data.data.parentId,
+          hasAlarm: data.data.hasAlarm,
+          Interval: interval,
+        });
+
+        // 2-3. 并行更新时间戳和在线状态（可以同时执行）
+        const [recordUpdated, statusUpdated] = await Promise.all([
+          terminalService.updateMountDeviceLastRecord(data.mac, data.pid, new Date()),
+          terminalService.updateMountDeviceOnlineStatus(data.mac, data.pid, true),
+        ]);
+
+        // 检查更新结果并记录警告
+        if (!recordUpdated) {
+          logger.warn(`Failed to update lastRecord for ${data.mac}/${data.pid} - device may not exist`);
+        }
+        if (!statusUpdated) {
+          logger.warn(`Failed to update online status for ${data.mac}/${data.pid} - device may not exist`);
+        }
+
+        logger.debug(`Result stored successfully: ${data.mac}/${data.pid}, ${data.data.result.length} items`);
+      } catch (error) {
+        logger.error(`Failed to process query result for ${data.mac}/${data.pid}:`, error);
+      }
+    } else {
+      // 查询失败处理
+      logger.warn(`Query failed: ${data.mac}/${data.pid}, error: ${data.error || 'unknown'}`);
+
+      // 如果查询失败，可能需要标记设备离线（可选，根据业务逻辑）
+      // await terminalService.updateMountDeviceOnlineStatus(data.mac, data.pid, false);
+    }
   }
 
   /**
@@ -818,7 +865,19 @@ private async sendQueryInstruct(query: MountDevQueryCache): Promise<void> {
   socket.emit('InstructQuery', queryRequest);
   query.bye = 0;
 
-  await terminalService.updateMountDeviceOnlineStatus(mac, query.pid, true);
+  // 更新 lastEmit 时间戳并检查结果
+  const [emitUpdated, statusUpdated] = await Promise.all([
+    terminalService.updateMountDeviceLastEmit(mac, query.pid, new Date()),
+    terminalService.updateMountDeviceOnlineStatus(mac, query.pid, true),
+  ]);
+
+  if (!emitUpdated) {
+    logger.warn(`Failed to update lastEmit for ${mac}/${query.pid} - device may not exist`);
+  }
+  if (!statusUpdated) {
+    logger.warn(`Failed to update online status for ${mac}/${query.pid} - device may not exist`);
+  }
+
   logger.debug(`Query sent: ${mac}/${query.pid}`);
 }
 

@@ -56,6 +56,7 @@ export class IndexManager {
 
   /**
    * 为单个集合创建索引
+   * 如果遇到重复键错误，自动清理重复数据并重试
    */
   private async ensureCollectionIndexes(def: IndexDefinition): Promise<{
     created: number;
@@ -84,6 +85,26 @@ export class IndexManager {
         if (error.code === 85 || error.code === 86) {
           existing++;
           console.log(`    ○ ${indexName} (已存在)`);
+        } else if (error.code === 11000) {
+          // E11000 重复键错误 - 尝试清理并重试
+          console.log(`    ⚠️  ${indexName} 存在重复数据，开始清理...`);
+
+          const cleaned = await this.cleanDuplicateData(def.collection, index.key, index.options);
+
+          if (cleaned > 0) {
+            console.log(`    ✓ 已清理 ${cleaned} 条重复数据，重试创建索引...`);
+            try {
+              await collection.createIndex(index.key, options);
+              created++;
+              console.log(`    ✓ ${indexName} (清理后创建成功)`);
+            } catch (retryError: any) {
+              console.error(`    ✗ ${indexName} 清理后仍然失败:`, retryError.message);
+              throw retryError;
+            }
+          } else {
+            console.error(`    ✗ ${indexName} 未找到可清理的重复数据`);
+            throw error;
+          }
         } else {
           throw error;
         }
@@ -100,6 +121,87 @@ export class IndexManager {
     return Object.entries(key)
       .map(([field, direction]) => `${field}_${direction}`)
       .join('_');
+  }
+
+  /**
+   * 清理重复数据
+   * @param collectionName - 集合名称
+   * @param indexKey - 索引键
+   * @param indexOptions - 索引选项
+   * @returns 清理的记录数
+   */
+  private async cleanDuplicateData(
+    collectionName: string,
+    indexKey: Record<string, 1 | -1>,
+    indexOptions?: CreateIndexesOptions
+  ): Promise<number> {
+    const collection = this.db.collection(collectionName);
+    const fields = Object.keys(indexKey);
+    let totalCleaned = 0;
+
+    // 特殊处理：如果是 sparse 索引，先清理 null 值（转为缺失字段）
+    if (indexOptions?.sparse && fields.length === 1) {
+      const field = fields[0]!; // Non-null assertion since we checked length === 1
+
+      // 1. 将 null 转为缺失字段
+      const nullFilter: any = {};
+      nullFilter[field] = null;
+      const nullUpdate: any = { $unset: {} };
+      nullUpdate.$unset[field] = '';
+      const nullToMissingResult = await collection.updateMany(nullFilter, nullUpdate);
+
+      if (nullToMissingResult.modifiedCount > 0) {
+        console.log(`      → 已将 ${nullToMissingResult.modifiedCount} 个 null 值转为缺失字段`);
+      }
+
+      // 2. 将空字符串转为 null 再转为缺失字段
+      const emptyFilter: any = {};
+      emptyFilter[field] = '';
+      const emptyUpdate: any = { $set: {} };
+      emptyUpdate.$set[field] = null;
+      const emptyResult = await collection.updateMany(emptyFilter, emptyUpdate);
+
+      if (emptyResult.modifiedCount > 0) {
+        const emptyToMissingResult = await collection.updateMany(nullFilter, nullUpdate);
+        console.log(`      → 已将 ${emptyToMissingResult.modifiedCount} 个空字符串转为缺失字段`);
+      }
+    }
+
+    // 构建聚合管道查找重复数据
+    const groupBy: Record<string, string> = {};
+    fields.forEach((f) => {
+      groupBy[f] = `$${f}`;
+    });
+
+    const duplicates = await collection
+      .aggregate([
+        {
+          $group: {
+            _id: fields.length === 1 ? `$${fields[0]}` : groupBy,
+            count: { $sum: 1 },
+            ids: { $push: '$_id' },
+          },
+        },
+        { $match: { count: { $gt: 1 } } },
+      ])
+      .toArray();
+
+    if (duplicates.length === 0) {
+      return 0;
+    }
+
+    console.log(`      → 发现 ${duplicates.length} 组重复数据`);
+
+    // 删除每组的重复记录（保留第一个）
+    for (const dup of duplicates) {
+      const idsToDelete = dup.ids.slice(1);
+      const result = await collection.deleteMany({
+        _id: { $in: idsToDelete },
+      });
+      totalCleaned += result.deletedCount || 0;
+    }
+
+    return totalCleaned;
   }
 
   /**
@@ -144,7 +246,7 @@ export class IndexManager {
       {
         collection: 'users',
         indexes: [
-          { key: { userId: 1 }, options: { unique: true } },
+          { key: { userId: 1 }, options: { unique: true, sparse: true } },
           { key: { user: 1 }, options: { unique: true } },
           { key: { tel: 1 }, options: { unique: true, sparse: true } },
           { key: { openId: 1 } },
