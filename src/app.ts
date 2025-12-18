@@ -129,8 +129,14 @@ export async function build(options: {
     // Initialize Socket.IO services after app is ready
     app.addHook('onReady', async () => {
       // Warmup terminal cache (load all online terminals)
-      app.log.info('Warming up terminal cache...');
-      await terminalCache.warmup(terminalRepository);
+      try {
+        app.log.info('Warming up terminal cache...');
+        await terminalCache.warmup(terminalRepository);
+        app.log.info('Terminal cache warmed up successfully');
+      } catch (error) {
+        app.log.error('Failed to warm up terminal cache:', error);
+        // 不阻止应用启动，但记录错误
+      }
 
       // Initialize Socket.IO (Node clients)
       socketIoService.initialize(app.io);
@@ -140,6 +146,19 @@ export async function build(options: {
 
       // Initialize User Push Service
       socketUserService.initialize(app.io);
+    });
+
+    // Graceful shutdown
+    app.addHook('onClose', async () => {
+      app.log.info('Shutting down services...');
+
+      // Destroy terminal cache
+      try {
+        terminalCache.destroy();
+        app.log.info('Terminal cache destroyed');
+      } catch (error) {
+        app.log.error('Error destroying terminal cache:', error);
+      }
     });
   }
 

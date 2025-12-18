@@ -3,8 +3,8 @@
  * 处理终端相关的 API 请求
  */
 
-import { Controller, Post, Get } from '../decorators/controller';
-import { Body } from '../decorators/params';
+import { Controller, Post, Get, Delete } from '../decorators/controller';
+import { Body, Params } from '../decorators/params';
 import type { QueryResult, QueryDataResponse } from '../schemas/query-data.schema';
 import { QueryResultSchema } from '../schemas/query-data.schema';
 import { terminalCache } from '../repositories/terminal-cache';
@@ -125,9 +125,17 @@ export class TerminalController {
    *   "total": 150,
    *   "maxSize": 1000,
    *   "breakdown": {
-   *     "online": 100,      // 在线终端（永久缓存）
-   *     "offlineHot": 30,   // 离线热数据（30分钟 TTL）
-   *     "offlineCold": 20   // 离线冷数据（5分钟 TTL）
+   *     "online": 100,           // 在线终端总数
+   *     "onlineStandard": 80,    // 标准协议在线终端（永久缓存）
+   *     "onlinePesiv": 20,       // pesiv协议在线终端（10分钟缓存）
+   *     "offlineHot": 30,        // 离线热数据（30分钟 TTL）
+   *     "offlineCold": 20        // 离线冷数据（5分钟 TTL）
+   *   },
+   *   "performance": {
+   *     "hits": 10000,
+   *     "misses": 100,
+   *     "evictions": 5,
+   *     "hitRate": "99.01%"
    *   },
    *   "details": {
    *     "avgAccessCount": "12.45",
@@ -142,6 +150,34 @@ export class TerminalController {
     return {
       status: 'ok',
       data: stats,
+      timestamp: Date.now(),
+    };
+  }
+
+  /**
+   * 清除特定终端的缓存
+   *
+   * @param mac - 终端 MAC 地址
+   */
+  @Delete('/cache/:mac')
+  async clearTerminalCache(@Params('mac') mac: string) {
+    terminalCache.invalidate(mac);
+    return {
+      status: 'ok',
+      message: `Cache cleared for terminal: ${mac}`,
+      timestamp: Date.now(),
+    };
+  }
+
+  /**
+   * 清空所有缓存
+   */
+  @Delete('/cache')
+  async clearAllCache() {
+    terminalCache.clear();
+    return {
+      status: 'ok',
+      message: 'All cache cleared',
       timestamp: Date.now(),
     };
   }

@@ -2,10 +2,12 @@
  * Terminal Service
  * 终端设备管理服务
  * 完全兼容老系统数据模型
+ *
+ * 注意：这是向后兼容层，内部委托给 TerminalRepository 和 TerminalEntity
+ * 新代码应该直接使用 terminalRepository.findByMac() 获取实体
  */
 
-import { mongodb } from '../database/mongodb';
-import { Collection } from 'mongodb';
+import { terminalRepository } from '../repositories/terminal.repository';
 import type {
   Terminal,
   MountDevice,
@@ -15,15 +17,9 @@ import type {
 
 /**
  * 终端服务类
- * 提供终端设备的 CRUD 操作
+ * 提供终端设备的 CRUD 操作（向后兼容 API）
  */
 export class TerminalService {
-  /**
-   * 获取终端集合（延迟加载）
-   */
-  private get collection(): Collection<Terminal> {
-    return mongodb.getCollection<Terminal>('terminals');
-  }
 
   /**
    * 获取单个终端
@@ -31,15 +27,18 @@ export class TerminalService {
    * @returns 终端对象或 null
    */
   async getTerminal(mac: string): Promise<Terminal | null> {
-    const terminal = await this.collection.findOne({
-      $or: [{ DevMac: mac }, { 'mountDevs.bindDev': mac }],
-    });
+    const entity = await terminalRepository.findByMac(mac);
+    return entity ? entity.getData() : null;
+  }
 
-    if (terminal) {
-      this.updateTerminalOnlineStatus(terminal);
-    }
-
-    return terminal;
+  /**
+   * 根据节点名称获取终端列表
+   * @param nodeName - 节点名称
+   * @returns 终端数组
+   */
+  async getTerminalsByNode(nodeName: string): Promise<Terminal[]> {
+    const entities = await terminalRepository.findByNode(nodeName);
+    return entities.map((e) => e.getData());
   }
 
   /**
@@ -48,13 +47,8 @@ export class TerminalService {
    * @returns 终端数组
    */
   async getTerminals(macs: string[]): Promise<Terminal[]> {
-    const terminals = await this.collection
-      .find({ DevMac: { $in: macs } })
-      .toArray();
-
-    terminals.forEach((terminal) => this.updateTerminalOnlineStatus(terminal));
-
-    return terminals;
+    const entities = await terminalRepository.findByMacs(macs);
+    return entities.map((e) => e.getData());
   }
 
   /**
@@ -63,27 +57,8 @@ export class TerminalService {
    * @returns 终端数组
    */
   async findTerminals(filter: TerminalFilter): Promise<Terminal[]> {
-    const terminals = await this.collection.find(filter).toArray();
-
-    terminals.forEach((terminal) => this.updateTerminalOnlineStatus(terminal));
-
-    return terminals;
-  }
-
-  /**
-   * 更新终端在线状态
-   * 特殊逻辑: pesiv 协议的设备，如果终端在线，则所有挂载设备在线
-   * @param terminal - 终端对象
-   */
-  private updateTerminalOnlineStatus(terminal: Terminal): void {
-    if (!terminal.mountDevs) return;
-
-    for (const dev of terminal.mountDevs) {
-      // pesiv 协议特殊处理
-      if (dev.protocol === 'pesiv' && terminal.online) {
-        dev.online = true;
-      }
-    }
+    const entities = await terminalRepository.find(filter);
+    return entities.map((e) => e.getData());
   }
 
   /**
@@ -107,12 +82,13 @@ export class TerminalService {
    * @returns 是否更新成功
    */
   async updateOnlineStatus(mac: string, online: boolean): Promise<boolean> {
-    const result = await this.collection.updateOne(
-      { DevMac: mac },
-      { $set: { online, uptime: new Date() } }
-    );
+    const entity = await terminalRepository.findByMac(mac);
+    if (!entity) {
+      return false;
+    }
 
-    return result.modifiedCount > 0;
+    entity.setOnline(online);
+    return await entity.flush();
   }
 
   /**
@@ -127,18 +103,13 @@ export class TerminalService {
     pid: number,
     online: boolean
   ): Promise<boolean> {
-    const result = await this.collection.updateOne(
-      { DevMac: mac, 'mountDevs.pid': pid },
-      {
-        $set: {
-          'mountDevs.$.online': online,
-          'mountDevs.$.lastRecord': new Date(),
-          uptime: new Date(),
-        },
-      }
-    );
+    const entity = await terminalRepository.findByMac(mac);
+    if (!entity) {
+      return false;
+    }
 
-    return result.modifiedCount > 0;
+    entity.setMountDeviceOnline(pid, online);
+    return await entity.flush();
   }
 
   /**
@@ -153,16 +124,13 @@ export class TerminalService {
     pid: number,
     time: Date
   ): Promise<boolean> {
-    const result = await this.collection.updateOne(
-      { DevMac: mac, 'mountDevs.pid': pid },
-      {
-        $set: {
-          'mountDevs.$.lastEmit': time,
-        },
-      }
-    );
+    const entity = await terminalRepository.findByMac(mac);
+    if (!entity) {
+      return false;
+    }
 
-    return result.modifiedCount > 0;
+    entity.setMountDeviceLastEmit(pid, time);
+    return await entity.flush();
   }
 
   /**
@@ -177,16 +145,13 @@ export class TerminalService {
     pid: number,
     time: Date
   ): Promise<boolean> {
-    const result = await this.collection.updateOne(
-      { DevMac: mac, 'mountDevs.pid': pid },
-      {
-        $set: {
-          'mountDevs.$.lastRecord': time,
-        },
-      }
-    );
+    const entity = await terminalRepository.findByMac(mac);
+    if (!entity) {
+      return false;
+    }
 
-    return result.modifiedCount > 0;
+    entity.setMountDeviceLastRecord(pid, time);
+    return await entity.flush();
   }
 
   /**
@@ -194,7 +159,8 @@ export class TerminalService {
    * @returns 在线终端列表
    */
   async getOnlineTerminals(): Promise<Terminal[]> {
-    return await this.collection.find({ online: true }).toArray();
+    const entities = await terminalRepository.findOnlineTerminals();
+    return entities.map((e) => e.getData());
   }
 
   /**
@@ -203,22 +169,7 @@ export class TerminalService {
    * @returns 操作耗时(ms)
    */
   async initTerminal(mac: string): Promise<number> {
-    const startTime = Date.now();
-
-    // 删除终端及相关数据
-    await Promise.all([
-      mongodb.getCollection('log.usebytes').deleteMany({ mac }),
-      mongodb
-        .getCollection('log.uartterminaldatatransfinites')
-        .deleteMany({ mac }),
-      this.collection.deleteOne({ DevMac: mac }),
-      mongodb.getCollection('log.dtubusys').deleteMany({ mac }),
-      mongodb.getCollection('client.resultcolltions').deleteMany({ mac }),
-      mongodb.getCollection('client.resultsingles').deleteMany({ mac }),
-      mongodb.getCollection('log.terminals').deleteMany({ TerminalMac: mac }),
-    ]);
-
-    return Date.now() - startTime;
+    return await terminalRepository.initialize(mac);
   }
 
   /**
@@ -227,23 +178,7 @@ export class TerminalService {
    * @returns 是否成功
    */
   async upsertTerminal(terminal: TerminalUpdate & { DevMac: string }): Promise<boolean> {
-    if (!terminal.DevMac) {
-      throw new Error('DevMac 字段必填');
-    }
-
-    const result = await this.collection.updateOne(
-      { DevMac: terminal.DevMac },
-      {
-        $set: {
-          ...terminal,
-          uptime: new Date(),
-          updatedAt: new Date(),
-        },
-      },
-      { upsert: true }
-    );
-
-    return result.acknowledged;
+    return await terminalRepository.upsert(terminal as any);
   }
 
   /**
@@ -253,17 +188,13 @@ export class TerminalService {
    * @returns 是否成功
    */
   async updateTerminal(mac: string, update: TerminalUpdate): Promise<boolean> {
-    const result = await this.collection.updateOne(
-      { DevMac: mac },
-      {
-        $set: {
-          ...update,
-          updatedAt: new Date(),
-        },
-      }
-    );
+    const entity = await terminalRepository.findByMac(mac);
+    if (!entity) {
+      return false;
+    }
 
-    return result.modifiedCount > 0;
+    entity.update(update as any);
+    return await entity.flush();
   }
 
   /**
@@ -272,8 +203,7 @@ export class TerminalService {
    * @returns 是否成功
    */
   async deleteTerminal(mac: string): Promise<boolean> {
-    const result = await this.collection.deleteOne({ DevMac: mac });
-    return result.deletedCount > 0;
+    return await terminalRepository.delete(mac);
   }
 
   /**
@@ -286,22 +216,13 @@ export class TerminalService {
     mac: string,
     iccidInfo: Partial<Terminal['iccidInfo']>
   ): Promise<boolean> {
-    // 使用点表示法更新嵌套字段
-    const updateFields: Record<string, any> = {
-      updatedAt: new Date(),
-    };
+    const entity = await terminalRepository.findByMac(mac);
+    if (!entity) {
+      return false;
+    }
 
-    // 为每个 iccidInfo 字段添加点表示法
-    Object.entries(iccidInfo).forEach(([key, value]) => {
-      updateFields[`iccidInfo.${key}`] = value;
-    });
-
-    const result = await this.collection.updateOne(
-      { DevMac: mac },
-      { $set: updateFields }
-    );
-
-    return result.modifiedCount > 0;
+    entity.updateIccidInfo(iccidInfo);
+    return await entity.flush();
   }
 }
 
