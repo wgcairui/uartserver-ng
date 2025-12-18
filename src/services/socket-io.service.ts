@@ -22,6 +22,14 @@ import type {
   InstructQueryRequest,
   OprateDtuRequest,
   DtuOperationType,
+  TerminalOnlineRequest,
+  TerminalOfflineRequest,
+  InstructTimeOutRequest,
+  TerminalMountDevTimeOutRequest,
+  BusyStatusRequest,
+  NodeReadyCallback,
+  StartErrorRequest,
+  AlarmRequest,
 } from '../types/socket-events';
 import type { Terminal } from '../types/entities/terminal.entity';
 import { nodeService } from './node.service';
@@ -29,8 +37,10 @@ import { terminalService } from './terminal.service';
 import { protocolService, type Protocol } from './protocol.service';
 import { resultService } from './result.service';
 import { dtuOperationLogService } from './dtu-operation-log.service';
+import { socketUserService } from './socket-user.service';
 import { logger } from '../utils/logger';
 import { config } from '../config';
+import { terminalCache } from '../repositories/terminal-cache';
 
 /**
  * Node Socket 信息 (缓存在内存中)
@@ -139,6 +149,11 @@ class SocketIoService extends EventEmitter {
   // 查询调度定时器
   private querySchedulerInterval?: NodeJS.Timeout;
 
+  // 定时任务定时器
+  private nodeInfoInterval?: NodeJS.Timeout;
+  private clearCacheInterval?: NodeJS.Timeout;
+  private clearNodeMapInterval?: NodeJS.Timeout;
+
   // 心跳超时时间 (ms)
   private readonly HEARTBEAT_TIMEOUT = 60000; // 60s
 
@@ -148,8 +163,16 @@ class SocketIoService extends EventEmitter {
   // 查询调度间隔 (ms)
   private readonly QUERY_SCHEDULER_INTERVAL = 500; // 500ms
 
+  // 定时任务间隔 (ms)
+  private readonly NODE_INFO_INTERVAL = 60000; // 1分钟
+  private readonly CLEAR_CACHE_INTERVAL = 600000; // 10分钟
+  private readonly CLEAR_NODEMAP_INTERVAL = 3600000; // 1小时
+
   // 当前轮次处理过的 MAC 地址集合（用于负载均衡）
   private hundleMacs: Set<string> = new Set();
+
+  // 设备忙碌状态缓存
+  private busyDevices: Set<string> = new Set();
 
   /**
    * 初始化 Socket.IO 服务
@@ -166,6 +189,9 @@ class SocketIoService extends EventEmitter {
 
     // 启动查询调度循环
     this.startQueryScheduler();
+
+    // 启动定时任务
+    this.startScheduledTasks();
   }
 
   /**
@@ -310,6 +336,40 @@ class SocketIoService extends EventEmitter {
     // 心跳
     socket.on('heartbeat', (data, callback) => {
       this.handleHeartbeat(socket, data, callback);
+    });
+
+    // 终端生命周期事件
+    socket.on('terminalOn', async (data) => {
+      await this.handleTerminalOnline(socket, data);
+    });
+
+    socket.on('terminalOff', async (data) => {
+      await this.handleTerminalOffline(socket, data);
+    });
+
+    socket.on('instructTimeOut', async (data) => {
+      await this.handleInstructTimeOut(socket, data);
+    });
+
+    socket.on('terminalMountDevTimeOut', async (data) => {
+      await this.handleTerminalMountDevTimeOut(socket, data);
+    });
+
+    socket.on('busy', async (data) => {
+      await this.handleBusy(socket, data);
+    });
+
+    socket.on('ready', async (callback) => {
+      await this.handleReady(socket, callback);
+    });
+
+    // 错误和告警事件
+    socket.on('startError', async (data) => {
+      await this.handleStartError(socket, data);
+    });
+
+    socket.on('alarm', async (data) => {
+      await this.handleAlarm(socket, data);
     });
   }
 
@@ -593,6 +653,324 @@ class SocketIoService extends EventEmitter {
   }
 
   /**
+   * 处理终端上线
+   */
+  private async handleTerminalOnline(
+    socket: Socket<
+      NodeClientToServerEvents,
+      ServerToNodeClientEvents,
+      InterServerEvents,
+      SocketData
+    >,
+    data: TerminalOnlineRequest
+  ): Promise<void> {
+    try {
+      const nodeInfo = this.nodeMap.get(socket.id);
+      if (!nodeInfo) {
+        logger.warn(`Node not found for terminal online: ${socket.id}`);
+        return;
+      }
+
+      const macs = Array.isArray(data.mac) ? data.mac : [data.mac];
+
+      for (const mac of macs) {
+        // 更新终端在线状态
+        await terminalService.updateOnlineStatus(mac, true);
+
+        // 更新缓存
+        const terminal = await terminalService.getTerminal(mac);
+        if (terminal) {
+          await this.updateTerminalCache(terminal, socket.id);
+          logger.info(`Terminal online: ${mac} on Node ${nodeInfo.Name}${data.reline ? ' (reconnect)' : ''}`);
+        }
+
+        // 通知 Repository 缓存：终端上线，设置永久 TTL
+        terminalCache.onTerminalOnline(mac);
+
+        // 移除忙碌状态
+        this.busyDevices.delete(mac);
+
+        // 刷新查询缓存
+        await this.setTerminalMountDevCache(mac);
+
+        // 推送设备上线通知给订阅用户
+        await socketUserService.sendMacUpdate(mac, {
+          type: 'online',
+          timestamp: Date.now(),
+        });
+      }
+    } catch (error) {
+      logger.error('Failed to handle terminal online:', error);
+    }
+  }
+
+  /**
+   * 处理终端下线
+   */
+  private async handleTerminalOffline(
+    socket: Socket<
+      NodeClientToServerEvents,
+      ServerToNodeClientEvents,
+      InterServerEvents,
+      SocketData
+    >,
+    data: TerminalOfflineRequest
+  ): Promise<void> {
+    try {
+      const nodeInfo = this.nodeMap.get(socket.id);
+      if (!nodeInfo) {
+        logger.warn(`Node not found for terminal offline: ${socket.id}`);
+        return;
+      }
+
+      // 更新终端在线状态
+      await terminalService.updateOnlineStatus(data.mac, false);
+
+      // 从缓存中移除
+      this.terminalCache.delete(data.mac);
+
+      // 通知 Repository 缓存：终端下线，设置 TTL
+      terminalCache.onTerminalOffline(data.mac);
+
+      // 删除查询缓存
+      const terminal = await terminalService.getTerminal(data.mac);
+      if (terminal?.mountDevs) {
+        for (const dev of terminal.mountDevs) {
+          this.delTerminalMountDevCache(data.mac, dev.pid);
+        }
+      }
+
+      // 移除忙碌状态
+      this.busyDevices.delete(data.mac);
+
+      logger.info(`Terminal offline: ${data.mac} from Node ${nodeInfo.Name}, active: ${data.active}`);
+
+      // 推送设备下线通知给订阅用户
+      await socketUserService.sendMacUpdate(data.mac, {
+        type: 'offline',
+        timestamp: Date.now(),
+        data: { active: data.active },
+      });
+    } catch (error) {
+      logger.error('Failed to handle terminal offline:', error);
+    }
+  }
+
+  /**
+   * 处理指令超时
+   */
+  private async handleInstructTimeOut(
+    socket: Socket<
+      NodeClientToServerEvents,
+      ServerToNodeClientEvents,
+      InterServerEvents,
+      SocketData
+    >,
+    data: InstructTimeOutRequest
+  ): Promise<void> {
+    try {
+      const nodeInfo = this.nodeMap.get(socket.id);
+      if (!nodeInfo) {
+        logger.warn(`Node not found for instruct timeout: ${socket.id}`);
+        return;
+      }
+
+      // 更新设备在线状态（部分超时仍然在线）
+      await terminalService.updateMountDeviceOnlineStatus(data.mac, data.pid, true);
+
+      logger.warn(
+        `Instruct timeout: ${data.mac}/${data.pid}, instructions: ${data.instruct.join(', ')}, Node: ${nodeInfo.Name}`
+      );
+
+      // 发送指令超时告警给用户
+      await socketUserService.sendMacAlarm(data.mac, data.pid, {
+        type: 'timeout',
+        level: 'warning',
+        message: `设备指令超时: ${data.instruct.join(', ')}`,
+        data: {
+          instruct: data.instruct,
+          node: nodeInfo.Name,
+        },
+      });
+    } catch (error) {
+      logger.error('Failed to handle instruct timeout:', error);
+    }
+  }
+
+  /**
+   * 处理设备查询超时
+   */
+  private async handleTerminalMountDevTimeOut(
+    socket: Socket<
+      NodeClientToServerEvents,
+      ServerToNodeClientEvents,
+      InterServerEvents,
+      SocketData
+    >,
+    data: TerminalMountDevTimeOutRequest
+  ): Promise<void> {
+    try {
+      const nodeInfo = this.nodeMap.get(socket.id);
+      if (!nodeInfo) {
+        logger.warn(`Node not found for terminal mount dev timeout: ${socket.id}`);
+        return;
+      }
+
+      // 如果超时次数 > 10，标记设备离线
+      if (data.timeOut > 10) {
+        await terminalService.updateMountDeviceOnlineStatus(data.mac, data.pid, false);
+
+        logger.warn(
+          `Terminal mount device timeout (${data.timeOut} times): ${data.mac}/${data.pid}, Node: ${nodeInfo.Name}`
+        );
+
+        // 发送设备查询超时告警给用户
+        await socketUserService.sendMacAlarm(data.mac, data.pid, {
+          type: 'timeout',
+          level: 'error',
+          message: `设备查询连续超时 ${data.timeOut} 次，已标记为离线`,
+          data: {
+            timeOut: data.timeOut,
+            node: nodeInfo.Name,
+          },
+        });
+      }
+    } catch (error) {
+      logger.error('Failed to handle terminal mount dev timeout:', error);
+    }
+  }
+
+  /**
+   * 处理设备忙碌状态
+   */
+  private async handleBusy(
+    _socket: Socket<
+      NodeClientToServerEvents,
+      ServerToNodeClientEvents,
+      InterServerEvents,
+      SocketData
+    >,
+    data: BusyStatusRequest
+  ): Promise<void> {
+    try {
+      if (data.busy) {
+        this.busyDevices.add(data.mac);
+        logger.debug(`Device ${data.mac} is busy, queue: ${data.n}`);
+      } else {
+        this.busyDevices.delete(data.mac);
+        logger.debug(`Device ${data.mac} is idle`);
+      }
+
+      // TODO: 可选 - 保存设备忙碌日志到数据库
+      // await logDevBusyService.save({
+      //   mac: data.mac,
+      //   stat: data.busy,
+      //   n: data.n,
+      //   timeStamp: Date.now(),
+      // });
+    } catch (error) {
+      logger.error('Failed to handle busy status:', error);
+    }
+  }
+
+  /**
+   * 处理节点就绪事件
+   */
+  private async handleReady(
+    socket: Socket<
+      NodeClientToServerEvents,
+      ServerToNodeClientEvents,
+      InterServerEvents,
+      SocketData
+    >,
+    callback: NodeReadyCallback
+  ): Promise<void> {
+    try {
+      const nodeInfo = this.nodeMap.get(socket.id);
+      if (!nodeInfo) {
+        logger.warn(`Node not found for ready event: ${socket.id}`);
+        return;
+      }
+
+      // 刷新该节点的所有终端缓存
+      const terminals = await terminalService.getTerminalsByNode(nodeInfo.Name);
+
+      for (const terminal of terminals) {
+        await this.setTerminalMountDevCache(terminal.DevMac);
+      }
+
+      logger.info(`Node ready: ${nodeInfo.Name}, terminals: ${terminals.length}`);
+
+      // 返回节点名称
+      callback(nodeInfo.Name);
+    } catch (error) {
+      logger.error('Failed to handle ready event:', error);
+    }
+  }
+
+  /**
+   * 处理节点启动失败事件
+   */
+  private async handleStartError(
+    socket: Socket<
+      NodeClientToServerEvents,
+      ServerToNodeClientEvents,
+      InterServerEvents,
+      SocketData
+    >,
+    data: StartErrorRequest
+  ): Promise<void> {
+    try {
+      const nodeInfo = this.nodeMap.get(socket.id);
+      if (!nodeInfo) {
+        logger.warn(`Node not found for start error: ${socket.id}`);
+        return;
+      }
+
+      logger.error(`Node ${nodeInfo.Name} start error: ${data.error}`);
+
+      // TODO: 记录到节点日志
+      // await logNodeService.save({
+      //   type: 'TcpServer启动失败',
+      //   ID: socket.id,
+      //   IP: nodeInfo.IP,
+      //   Name: nodeInfo.Name,
+      //   error: data.error,
+      // });
+    } catch (error) {
+      logger.error('Failed to handle start error:', error);
+    }
+  }
+
+  /**
+   * 处理告警事件
+   */
+  private async handleAlarm(
+    socket: Socket<
+      NodeClientToServerEvents,
+      ServerToNodeClientEvents,
+      InterServerEvents,
+      SocketData
+    >,
+    data: AlarmRequest
+  ): Promise<void> {
+    try {
+      const nodeInfo = this.nodeMap.get(socket.id);
+      if (!nodeInfo) {
+        logger.warn(`Node not found for alarm: ${socket.id}`);
+        return;
+      }
+
+      logger.warn(`Alarm from ${nodeInfo.Name}: ${JSON.stringify(data)}`);
+
+      // TODO: 处理告警，发送给用户
+      // await this.sendUserAlarm(data.mac, 0, data.alarm);
+    } catch (error) {
+      logger.error('Failed to handle alarm:', error);
+    }
+  }
+
+  /**
    * 处理断开连接
    */
   private handleDisconnect(
@@ -714,6 +1092,58 @@ class SocketIoService extends EventEmitter {
       clearInterval(this.querySchedulerInterval);
       this.querySchedulerInterval = undefined;
       logger.info('Query scheduler stopped');
+    }
+  }
+
+  /**
+   * 启动定时任务
+   */
+  private startScheduledTasks(): void {
+    // 1. nodeInfo 定时任务 - 每分钟
+    if (!this.nodeInfoInterval) {
+      this.nodeInfoInterval = setInterval(() => {
+        this.nodeInfo();
+      }, this.NODE_INFO_INTERVAL);
+      logger.info('NodeInfo task started (interval: 1 minute)');
+    }
+
+    // 2. clear_Cache 定时任务 - 每10分钟
+    if (!this.clearCacheInterval) {
+      this.clearCacheInterval = setInterval(() => {
+        this.clear_Cache();
+      }, this.CLEAR_CACHE_INTERVAL);
+      logger.info('ClearCache task started (interval: 10 minutes)');
+    }
+
+    // 3. clear_nodeMap 定时任务 - 每小时
+    if (!this.clearNodeMapInterval) {
+      this.clearNodeMapInterval = setInterval(() => {
+        this.clear_nodeMap();
+      }, this.CLEAR_NODEMAP_INTERVAL);
+      logger.info('ClearNodeMap task started (interval: 1 hour)');
+    }
+  }
+
+  /**
+   * 停止定时任务
+   */
+  private stopScheduledTasks(): void {
+    if (this.nodeInfoInterval) {
+      clearInterval(this.nodeInfoInterval);
+      this.nodeInfoInterval = undefined;
+      logger.info('NodeInfo task stopped');
+    }
+
+    if (this.clearCacheInterval) {
+      clearInterval(this.clearCacheInterval);
+      this.clearCacheInterval = undefined;
+      logger.info('ClearCache task stopped');
+    }
+
+    if (this.clearNodeMapInterval) {
+      clearInterval(this.clearNodeMapInterval);
+      this.clearNodeMapInterval = undefined;
+      logger.info('ClearNodeMap task stopped');
     }
   }
 
@@ -1308,11 +1738,152 @@ delNodeCache(nodeName: string): void {
 }
 
 /**
+ * 检查设备是否忙碌
+ */
+isDeviceBusy(mac: string): boolean {
+  return this.busyDevices.has(mac);
+}
+
+/**
+ * 获取所有忙碌设备
+ */
+getBusyDevices(): string[] {
+  return Array.from(this.busyDevices);
+}
+
+/**
+ * 发送消息到指定节点并等待响应
+ * @param nodeName - 节点名称
+ * @param eventName - 事件名称
+ * @param data - 发送的数据
+ * @param timeout - 超时时间(ms)，默认 10000
+ * @returns Promise<T> - 节点返回的数据
+ */
+async sendMessagetoNode<T = unknown>(
+  nodeName: string,
+  eventName: string,
+  data: unknown = {},
+  timeout = 10000
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    // 生成唯一的响应事件名称
+    const resultEventName = `${eventName}_result_${Date.now()}`;
+
+    // 获取节点 Socket
+    const nodeSocket = this.nodeNameMap.get(nodeName);
+    if (!nodeSocket) {
+      reject(new Error(`Node not found: ${nodeName}`));
+      return;
+    }
+
+    // 设置超时
+    const timer = setTimeout(() => {
+      this.off(resultEventName); // 清理事件监听器
+      reject(new Error(`Message timeout: ${nodeName} - ${eventName}`));
+    }, timeout);
+
+    // 监听响应事件（一次性）
+    this.once(resultEventName, (result: T) => {
+      clearTimeout(timer);
+      resolve(result);
+    });
+
+    // 发送消息到节点
+    nodeSocket.emit(eventName as any, {
+      ...data,
+      resultEventName, // 告知节点响应事件名称
+    });
+
+    logger.debug(`Message sent to node: ${nodeName}, event: ${eventName}`);
+  });
+}
+
+/**
+ * 重启指定节点
+ * @param nodeName - 节点名称
+ */
+async nodeRestart(nodeName: string): Promise<void> {
+  await this.sendMessagetoNode(nodeName, 'restart');
+  logger.info(`Node restart requested: ${nodeName}`);
+}
+
+/**
+ * 向所有节点发送状态查询
+ * 定时任务：每分钟执行一次
+ */
+async nodeInfo(): Promise<void> {
+  try {
+    const nodes = await nodeService.getActiveNodes();
+    for (const node of nodes) {
+      const nodeSocket = this.nodeNameMap.get(node.Name);
+      if (nodeSocket) {
+        nodeSocket.emit('nodeInfo' as any, node.Name);
+      }
+    }
+    logger.debug(`NodeInfo sent to ${nodes.length} nodes`);
+  } catch (error) {
+    logger.error('Failed to send nodeInfo:', error);
+  }
+}
+
+/**
+ * 清理节点映射缓存
+ * 定时任务：每小时执行一次
+ * 清理前先发送 nodeInfo 确保节点重新注册
+ */
+async clear_nodeMap(): Promise<void> {
+  try {
+    // 先发送 nodeInfo 让节点重新注册
+    await this.nodeInfo();
+
+    // 清理缓存
+    this.nodeMap.clear();
+    this.hundleMacs.clear();
+
+    logger.info('NodeMap cache cleared');
+  } catch (error) {
+    logger.error('Failed to clear nodeMap:', error);
+  }
+}
+
+/**
+ * 刷新终端查询缓存
+ * 定时任务：每10分钟执行一次
+ * 重新加载所有节点的终端配置到缓存
+ */
+async clear_Cache(): Promise<void> {
+  try {
+    const cacheSize = this.queryCache.size;
+    logger.info(`Refreshing query cache, current size: ${cacheSize}`);
+
+    // 获取所有活跃节点
+    const nodes = await nodeService.getActiveNodes();
+
+    // 并发刷新所有节点的缓存
+    await Promise.all(
+      nodes
+        .filter((node) => !['pwsiv', 'besiv-1'].includes(node.Name)) // 排除特殊节点
+        .map(async (node) => {
+          const terminals = await terminalService.getTerminalsByNode(node.Name);
+          for (const terminal of terminals) {
+            await this.setTerminalMountDevCache(terminal.DevMac);
+          }
+        })
+    );
+
+    logger.info(`Query cache refreshed, new size: ${this.queryCache.size}`);
+  } catch (error) {
+    logger.error('Failed to refresh query cache:', error);
+  }
+}
+
+/**
  * 清理服务
  */
 cleanup(): void {
     this.stopHeartbeatCheck();
     this.stopQueryScheduler();
+    this.stopScheduledTasks();
     this.nodeMap.clear();
     this.nodeNameMap.clear();
     this.terminalCache.clear();
@@ -1320,6 +1891,7 @@ cleanup(): void {
     this.CacheQueryInstruct.clear();
     this.queryCache.clear();
     this.hundleMacs.clear();
+    this.busyDevices.clear();
     this.removeAllListeners();
     logger.info('SocketIoService cleaned up');
   }

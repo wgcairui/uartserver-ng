@@ -125,6 +125,69 @@ export interface HeartbeatRequest {
   timestamp: number; // 时间戳
 }
 
+/**
+ * 终端上线事件
+ */
+export interface TerminalOnlineRequest {
+  mac: string | string[]; // 终端 MAC 地址（单个或批量）
+  reline?: boolean; // 是否为重连
+}
+
+/**
+ * 终端下线事件
+ */
+export interface TerminalOfflineRequest {
+  mac: string; // 终端 MAC 地址
+  active: boolean; // 是否为主动断开
+}
+
+/**
+ * 指令超时事件
+ */
+export interface InstructTimeOutRequest {
+  mac: string; // 终端 MAC
+  pid: number; // 设备 PID
+  instruct: string[]; // 超时的指令列表
+}
+
+/**
+ * 设备查询超时事件
+ */
+export interface TerminalMountDevTimeOutRequest {
+  mac: string; // 终端 MAC
+  pid: number; // 设备 PID
+  timeOut: number; // 超时次数
+}
+
+/**
+ * 设备忙碌状态事件
+ */
+export interface BusyStatusRequest {
+  mac: string; // 终端 MAC
+  busy: boolean; // 是否忙碌
+  n: number; // 排队数量
+}
+
+/**
+ * 节点就绪事件（无参数，使用 callback 返回节点名称）
+ */
+export type NodeReadyCallback = (nodeName: string) => void;
+
+/**
+ * 节点启动失败事件
+ */
+export interface StartErrorRequest {
+  error: string; // 错误信息
+}
+
+/**
+ * 告警事件
+ */
+export interface AlarmRequest {
+  mac: string; // 终端 MAC
+  alarm: any; // 告警数据
+}
+
 // ============================================================
 // Socket.IO 类型化接口
 // ============================================================
@@ -150,6 +213,24 @@ export interface NodeClientToServerEvents {
     data: HeartbeatRequest,
     callback: (response: HeartbeatResponse) => void
   ) => void;
+
+  // 终端生命周期事件
+  terminalOn: (data: TerminalOnlineRequest) => void;
+
+  terminalOff: (data: TerminalOfflineRequest) => void;
+
+  instructTimeOut: (data: InstructTimeOutRequest) => void;
+
+  terminalMountDevTimeOut: (data: TerminalMountDevTimeOutRequest) => void;
+
+  busy: (data: BusyStatusRequest) => void;
+
+  ready: (callback: NodeReadyCallback) => void;
+
+  // 错误和告警事件
+  startError: (data: StartErrorRequest) => void;
+
+  alarm: (data: AlarmRequest) => void;
 }
 
 /**

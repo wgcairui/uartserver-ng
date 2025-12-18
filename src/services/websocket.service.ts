@@ -16,7 +16,6 @@ import type {
   UnsubscribeDeviceRequest,
   UnsubscribeDeviceResponse,
   UserHeartbeatRequest,
-  UserHeartbeatResponse,
   DeviceUpdate,
   BatchDeviceUpdate,
   SubscriptionInfo,
@@ -24,7 +23,6 @@ import type {
 import { getRoomName, parseRoomName } from '../types/websocket-events';
 import type { JwtPayload } from '../types/jwt';
 import { extractUserId, extractUsername } from '../types/jwt';
-import { terminalService } from './terminal.service';
 import { mongodb } from '../database/mongodb';
 import { logger } from '../utils/logger';
 import { config } from '../config';

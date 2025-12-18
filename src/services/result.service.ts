@@ -11,6 +11,7 @@ import type {
 } from '../types/entities/result.entity';
 import { logger } from '../utils/logger';
 import { webSocketService } from './websocket.service';
+import { socketUserService } from './socket-user.service';
 import { getRoomName } from '../types/websocket-events';
 
 /**
@@ -66,6 +67,24 @@ class ResultService {
       throw new Error(`Invalid timestamp: ${timeStamp}`);
     }
 
+    // 准备单例结果数据（在 transaction 外定义，以便后续推送使用）
+    const singleResult: Omit<TerminalClientResultSingle, '_id'> = {
+      mac,
+      pid,
+      result: result.map((r) => ({
+        name: r.name,
+        value: r.value,
+        parseValue: r.parseValue,
+        alarm: r.alarm ?? false, // 使用实际值或默认 false
+        unit: r.unit ?? '', // 使用实际值或空字符串
+        issimulate: r.issimulate ?? false, // 使用实际值或默认 false
+      })),
+      time: new Date(timeStamp).toISOString(),
+      useTime,
+      parentId,
+      Interval,
+    };
+
     // 使用事务确保两个集合操作的原子性
     const session = mongodb.getClient().startSession();
 
@@ -91,25 +110,6 @@ class ResultService {
           .insertOne(historicalResult as TerminalClientResult, { session });
 
         // 2. 更新单例集合 (client.resultsingles) - upsert
-        //    注意：单例集合需要完整的 ResultItem (包含 alarm, unit, issimulate)
-        //    如果 result 中已包含这些字段则使用实际值，否则使用默认值
-        const singleResult: Omit<TerminalClientResultSingle, '_id'> = {
-          mac,
-          pid,
-          result: result.map((r) => ({
-            name: r.name,
-            value: r.value,
-            parseValue: r.parseValue,
-            alarm: r.alarm ?? false, // 使用实际值或默认 false
-            unit: r.unit ?? '', // 使用实际值或空字符串
-            issimulate: r.issimulate ?? false, // 使用实际值或默认 false
-          })),
-          time: new Date(timeStamp).toISOString(),
-          useTime,
-          parentId,
-          Interval,
-        };
-
         await mongodb
           .getCollection<TerminalClientResultSingle>('client.resultsingles')
           .updateOne({ mac, pid }, { $set: singleResult }, { upsert: true, session });
@@ -147,7 +147,7 @@ class ResultService {
         return;
       }
 
-      // 推送数据更新
+      // 推送数据更新（通过 WebSocket 房间）
       webSocketService.pushToRoom(room, {
         type: 'data',
         mac,
@@ -155,6 +155,9 @@ class ResultService {
         data: data as TerminalClientResultSingle,
         timestamp: Date.now(),
       });
+
+      // 推送数据更新（通过用户推送服务）
+      await socketUserService.sendMacDataUpdate(mac, pid, data);
 
       // 如果有告警，额外推送告警消息
       if (hasAlarm > 0) {
@@ -166,6 +169,14 @@ class ResultService {
           alarmLevel: 'warning',
           message: '设备数据存在告警',
           timestamp: Date.now(),
+          data: data.result.filter((r) => r.alarm),
+        });
+
+        // 推送告警（通过用户推送服务）
+        await socketUserService.sendMacAlarm(mac, pid, {
+          type: 'argument',
+          level: 'warning',
+          message: '设备数据存在告警',
           data: data.result.filter((r) => r.alarm),
         });
       }

@@ -3,10 +3,11 @@
  * 处理终端相关的 API 请求
  */
 
-import { Controller, Post } from '../decorators/controller';
+import { Controller, Post, Get } from '../decorators/controller';
 import { Body } from '../decorators/params';
 import type { QueryResult, QueryDataResponse } from '../schemas/query-data.schema';
 import { QueryResultSchema } from '../schemas/query-data.schema';
+import { terminalCache } from '../repositories/terminal-cache';
 
 /**
  * Terminal Controller
@@ -113,6 +114,35 @@ export class TerminalController {
   async getStatus(): Promise<{ processingCount: number }> {
     return {
       processingCount: this.parseSet.size,
+    };
+  }
+
+  /**
+   * 获取缓存统计信息（用于监控）
+   *
+   * 返回值示例：
+   * {
+   *   "total": 150,
+   *   "maxSize": 1000,
+   *   "breakdown": {
+   *     "online": 100,      // 在线终端（永久缓存）
+   *     "offlineHot": 30,   // 离线热数据（30分钟 TTL）
+   *     "offlineCold": 20   // 离线冷数据（5分钟 TTL）
+   *   },
+   *   "details": {
+   *     "avgAccessCount": "12.45",
+   *     "oldestEntry": 1703001234567,
+   *     "newestEntry": 1703005678901
+   *   }
+   * }
+   */
+  @Get('/cache/stats')
+  async getCacheStats() {
+    const stats = terminalCache.getStats();
+    return {
+      status: 'ok',
+      data: stats,
+      timestamp: Date.now(),
     };
   }
 }

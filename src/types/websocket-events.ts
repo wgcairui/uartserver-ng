@@ -42,7 +42,7 @@ export interface SubscribeDeviceRequest {
 export interface SubscribeDeviceResponse {
   success: boolean;
   message?: string;
-  room: string; // 房间名称
+  room?: string; // 房间名称（成功时返回）
 }
 
 /**
