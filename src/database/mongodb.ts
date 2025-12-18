@@ -4,7 +4,7 @@
  */
 
 import { MongoClient, Db, Collection, Document, MongoClientOptions } from 'mongodb';
-import { config } from '../config';
+import { derivedConfig } from '../config';
 
 /**
  * MongoDB 连接管理器类
@@ -48,11 +48,11 @@ export class MongoDBManager {
       compressors: ['zlib'], // 启用压缩
     };
 
-    this.client = new MongoClient(config.MONGODB_URI, options);
+    this.client = new MongoClient(derivedConfig.mongodbUri, options);
     await this.client.connect();
 
     // 提取数据库名称
-    const dbName = this.extractDatabaseName(config.MONGODB_URI);
+    const dbName = this.extractDatabaseName(derivedConfig.mongodbUri);
     this.db = this.client.db(dbName);
 
     console.log(`✓ MongoDB 已连接: ${dbName}`);

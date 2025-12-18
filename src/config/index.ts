@@ -17,6 +17,7 @@ const envSchema = z.object({
 
   // MongoDB
   MONGODB_URI: z.string().default('mongodb://localhost:27017/uart_server'),
+  TEST_MONGODB_URI: z.string().default('mongodb://localhost:27017/uart_server_test'),
 
   // PostgreSQL
   DB_HOST: z.string().default('localhost'),
@@ -173,6 +174,13 @@ export const derivedConfig = {
    * 是否为测试环境
    */
   isTest: config.NODE_ENV === 'test',
+
+  /**
+   * MongoDB URI（测试环境使用测试数据库）
+   */
+  get mongodbUri(): string {
+    return config.NODE_ENV === 'test' ? config.TEST_MONGODB_URI : config.MONGODB_URI;
+  },
 
   /**
    * 完整的服务器地址
