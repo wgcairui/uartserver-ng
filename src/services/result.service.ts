@@ -85,47 +85,77 @@ class ResultService {
       Interval,
     };
 
-    // 使用事务确保两个集合操作的原子性
-    const session = mongodb.getClient().startSession();
+    // 准备历史结果数据
+    const historicalResult: Omit<TerminalClientResult, '_id'> = {
+      mac,
+      pid,
+      result: result.map((r) => ({
+        name: r.name,
+        value: r.value,
+        parseValue: r.parseValue,
+      })),
+      timeStamp,
+      useTime,
+      parentId,
+      hasAlarm,
+    };
 
-    try {
-      await session.withTransaction(async () => {
+    // 检测是否应该使用事务
+    // 在测试环境中跳过事务（单实例 MongoDB 不支持事务）
+    const useTransactions = process.env.NODE_ENV !== 'test';
+
+    if (useTransactions) {
+      // 使用事务确保两个集合操作的原子性
+      const session = mongodb.getClient().startSession();
+
+      try {
+        await session.withTransaction(async () => {
+          // 1. 存储到历史集合 (client.resultcolltions)
+          await mongodb
+            .getCollection<TerminalClientResult>('client.resultcolltions')
+            .insertOne(historicalResult as TerminalClientResult, { session });
+
+          // 2. 更新单例集合 (client.resultsingles) - upsert
+          await mongodb
+            .getCollection<TerminalClientResultSingle>('client.resultsingles')
+            .updateOne({ mac, pid }, { $set: singleResult }, { upsert: true, session });
+        });
+
+        logger.debug(`Result saved: ${mac}/${pid}, ${result.length} items, hasAlarm=${hasAlarm}`);
+
+        // 推送实时数据给订阅用户（异步，不等待）
+        this.pushRealTimeUpdate(mac, pid, singleResult, hasAlarm).catch((error) => {
+          logger.error(`Failed to push real-time update for ${mac}/${pid}:`, error);
+        });
+      } catch (error) {
+        logger.error(`Failed to save query result for ${mac}/${pid}:`, error);
+        throw error;
+      } finally {
+        await session.endSession();
+      }
+    } else {
+      // 测试环境：不使用事务，直接执行操作
+      try {
         // 1. 存储到历史集合 (client.resultcolltions)
-        const historicalResult: Omit<TerminalClientResult, '_id'> = {
-          mac,
-          pid,
-          result: result.map((r) => ({
-            name: r.name,
-            value: r.value,
-            parseValue: r.parseValue,
-          })),
-          timeStamp,
-          useTime,
-          parentId,
-          hasAlarm,
-        };
-
         await mongodb
           .getCollection<TerminalClientResult>('client.resultcolltions')
-          .insertOne(historicalResult as TerminalClientResult, { session });
+          .insertOne(historicalResult as TerminalClientResult);
 
         // 2. 更新单例集合 (client.resultsingles) - upsert
         await mongodb
           .getCollection<TerminalClientResultSingle>('client.resultsingles')
-          .updateOne({ mac, pid }, { $set: singleResult }, { upsert: true, session });
-      });
+          .updateOne({ mac, pid }, { $set: singleResult }, { upsert: true });
 
-      logger.debug(`Result saved: ${mac}/${pid}, ${result.length} items, hasAlarm=${hasAlarm}`);
+        logger.debug(`Result saved (no transaction): ${mac}/${pid}, ${result.length} items, hasAlarm=${hasAlarm}`);
 
-      // 推送实时数据给订阅用户（异步，不等待）
-      this.pushRealTimeUpdate(mac, pid, singleResult, hasAlarm).catch((error) => {
-        logger.error(`Failed to push real-time update for ${mac}/${pid}:`, error);
-      });
-    } catch (error) {
-      logger.error(`Failed to save query result for ${mac}/${pid}:`, error);
-      throw error;
-    } finally {
-      await session.endSession();
+        // 推送实时数据给订阅用户（异步，不等待）
+        this.pushRealTimeUpdate(mac, pid, singleResult, hasAlarm).catch((error) => {
+          logger.error(`Failed to push real-time update for ${mac}/${pid}:`, error);
+        });
+      } catch (error) {
+        logger.error(`Failed to save query result for ${mac}/${pid}:`, error);
+        throw error;
+      }
     }
   }
 

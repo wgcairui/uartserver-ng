@@ -546,7 +546,7 @@ class SocketIoService extends EventEmitter {
    * 处理查询结果
    */
   private async handleQueryResult(
-    _socket: Socket<
+    socket: Socket<
       NodeClientToServerEvents,
       ServerToNodeClientEvents,
       InterServerEvents,
@@ -596,12 +596,34 @@ class SocketIoService extends EventEmitter {
         }
 
         logger.debug(`Result stored successfully: ${data.mac}/${data.pid}, ${data.data.result.length} items`);
+
+        // 发送确认事件回客户端 (用于性能测试等场景)
+        socket.emit(data.eventName, {
+          success: true,
+          mac: data.mac,
+          pid: data.pid,
+        });
       } catch (error) {
         logger.error(`Failed to process query result for ${data.mac}/${data.pid}:`, error);
+        // 发送失败事件回客户端
+        socket.emit(data.eventName, {
+          success: false,
+          mac: data.mac,
+          pid: data.pid,
+          error: String(error),
+        });
       }
     } else {
       // 查询失败处理
       logger.warn(`Query failed: ${data.mac}/${data.pid}, error: ${data.error || 'unknown'}`);
+
+      // 发送失败确认回客户端
+      socket.emit(data.eventName, {
+        success: false,
+        mac: data.mac,
+        pid: data.pid,
+        error: data.error || 'unknown',
+      });
 
       // 如果查询失败，可能需要标记设备离线（可选，根据业务逻辑）
       // await terminalService.updateMountDeviceOnlineStatus(data.mac, data.pid, false);
@@ -1813,7 +1835,7 @@ async nodeRestart(nodeName: string): Promise<void> {
  */
 async nodeInfo(): Promise<void> {
   try {
-    const nodes = await nodeService.getActiveNodes();
+    const nodes = await nodeService.getAllNodes();
     for (const node of nodes) {
       const nodeSocket = this.nodeNameMap.get(node.Name);
       if (nodeSocket) {
