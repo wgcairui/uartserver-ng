@@ -14,8 +14,10 @@ import { mongodb } from './database/mongodb';
 import { IndexManager } from './services/index-manager';
 import { registerControllers } from './utils/route-loader';
 import { TerminalController } from './controllers/terminal.controller';
+import { DtuController } from './controllers/dtu.controller';
 import { socketService } from './services/socket.service';
 import { socketIoService } from './services/socket-io.service';
+import { webSocketService } from './services/websocket.service';
 
 /**
  * 创建并配置 Fastify 应用
@@ -115,6 +117,9 @@ async function createApp() {
     transports: ['websocket', 'polling'],
     pingTimeout: 60000, // 60s ping timeout
     pingInterval: 25000, // 25s ping interval
+    maxHttpBufferSize: 1e6, // 1MB - 防止恶意客户端发送超大消息
+    connectTimeout: 45000, // 45s 连接超时
+    upgradeTimeout: 10000, // 10s 升级超时
   });
 
   // 健康检查端点
@@ -143,7 +148,7 @@ async function createApp() {
   });
 
   // 注册控制器
-  registerControllers(app, [TerminalController]);
+  registerControllers(app, [TerminalController, DtuController]);
 
   return app;
 }
@@ -180,10 +185,10 @@ async function start() {
     socketIoService.initialize(app.io);
     console.log('✅ Socket.IO (Node 客户端) 初始化完成');
 
-    // 5. 初始化 WebSocket (浏览器客户端)
-    console.log('🔌 正在初始化 WebSocket (浏览器客户端)...');
-    socketService.initialize(app.server);
-    console.log('✅ WebSocket (浏览器客户端) 初始化完成\n');
+    // 5. 初始化 WebSocket (浏览器用户)
+    console.log('🔌 正在初始化 WebSocket (浏览器用户)...');
+    await webSocketService.initialize(app.io);
+    console.log('✅ WebSocket (浏览器用户) 初始化完成\n');
 
     console.log(`
 ╔═══════════════════════════════════════════════════════════╗

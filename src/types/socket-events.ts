@@ -114,7 +114,9 @@ export type DtuOperationType =
   | 'restart' // 重启 DTU
   | 'restart485' // 重启 485 接口
   | 'updateMount' // 更新挂载设备配置
-  | 'OprateInstruct'; // 透传自定义指令
+  | 'OprateInstruct' // 透传自定义指令
+  | 'setTerminal' // 设置终端参数
+  | 'getTerminal'; // 获取终端信息
 
 /**
  * 心跳请求

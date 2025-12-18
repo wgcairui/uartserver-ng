@@ -10,6 +10,8 @@ import type {
   SaveResultItem,
 } from '../types/entities/result.entity';
 import { logger } from '../utils/logger';
+import { webSocketService } from './websocket.service';
+import { getRoomName } from '../types/websocket-events';
 
 /**
  * 扩展的保存结果项类型
@@ -114,11 +116,64 @@ class ResultService {
       });
 
       logger.debug(`Result saved: ${mac}/${pid}, ${result.length} items, hasAlarm=${hasAlarm}`);
+
+      // 推送实时数据给订阅用户（异步，不等待）
+      this.pushRealTimeUpdate(mac, pid, singleResult, hasAlarm).catch((error) => {
+        logger.error(`Failed to push real-time update for ${mac}/${pid}:`, error);
+      });
     } catch (error) {
       logger.error(`Failed to save query result for ${mac}/${pid}:`, error);
       throw error;
     } finally {
       await session.endSession();
+    }
+  }
+
+  /**
+   * 推送实时数据更新（异步，不阻塞主流程）
+   */
+  private async pushRealTimeUpdate(
+    mac: string,
+    pid: number,
+    data: Omit<TerminalClientResultSingle, '_id'>,
+    hasAlarm: number
+  ): Promise<void> {
+    try {
+      const room = getRoomName(mac, pid);
+      const subscriberCount = webSocketService.getRoomSubscriberCount(mac, pid);
+
+      // 如果没有订阅者，跳过推送
+      if (subscriberCount === 0) {
+        return;
+      }
+
+      // 推送数据更新
+      webSocketService.pushToRoom(room, {
+        type: 'data',
+        mac,
+        pid,
+        data: data as TerminalClientResultSingle,
+        timestamp: Date.now(),
+      });
+
+      // 如果有告警，额外推送告警消息
+      if (hasAlarm > 0) {
+        webSocketService.pushToRoom(room, {
+          type: 'alarm',
+          mac,
+          pid,
+          alarmType: 'data_alarm',
+          alarmLevel: 'warning',
+          message: '设备数据存在告警',
+          timestamp: Date.now(),
+          data: data.result.filter((r) => r.alarm),
+        });
+      }
+
+      logger.debug(`Pushed real-time update to ${subscriberCount} subscribers in room ${room}`);
+    } catch (error) {
+      // 推送失败不应该影响主流程，只记录日志
+      logger.error('Failed to push real-time update:', error);
     }
   }
 

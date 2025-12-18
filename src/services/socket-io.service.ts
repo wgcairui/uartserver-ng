@@ -28,6 +28,7 @@ import { nodeService } from './node.service';
 import { terminalService } from './terminal.service';
 import { protocolService, type Protocol } from './protocol.service';
 import { resultService } from './result.service';
+import { dtuOperationLogService } from './dtu-operation-log.service';
 import { logger } from '../utils/logger';
 import { config } from '../config';
 
@@ -1082,20 +1083,58 @@ async InstructQuery(
 async OprateDTU(
   DevMac: string,
   type: DtuOperationType,
-  content?: any
+  content?: any,
+  operatedBy: string = 'system'
 ): Promise<OprateDtuResult> {
+  const startTime = Date.now();
   const terminal = await terminalService.getTerminal(DevMac);
+
   if (!terminal) {
+    // 记录失败日志
+    await dtuOperationLogService.log({
+      mac: DevMac,
+      operation: type,
+      content,
+      success: false,
+      message: '设备不存在',
+      operatedBy,
+      useTime: Date.now() - startTime,
+      error: '设备不存在',
+    });
     throw new Error('设备不存在');
   }
 
   const socketId = this.nodeNameMap.get(terminal.mountNode);
   if (!socketId) {
+    // 记录失败日志
+    await dtuOperationLogService.log({
+      mac: DevMac,
+      operation: type,
+      content,
+      success: false,
+      message: '设备所在节点离线',
+      operatedBy,
+      useTime: Date.now() - startTime,
+      nodeName: terminal.mountNode,
+      error: '节点离线',
+    });
     return { ok: 0, msg: '设备所在节点离线' };
   }
 
   const socket = this.io?.of('/node').sockets.get(socketId);
   if (!socket) {
+    // 记录失败日志
+    await dtuOperationLogService.log({
+      mac: DevMac,
+      operation: type,
+      content,
+      success: false,
+      message: '设备所在节点离线',
+      operatedBy,
+      useTime: Date.now() - startTime,
+      nodeName: terminal.mountNode,
+      error: 'Socket不存在',
+    });
     return { ok: 0, msg: '设备所在节点离线' };
   }
 
@@ -1103,15 +1142,45 @@ async OprateDTU(
 
   return new Promise((resolve) => {
     // 设置超时定时器
-    const timeoutId = setTimeout(() => {
+    const timeoutId = setTimeout(async () => {
       this.removeAllListeners(eventName);
+
+      // 记录超时日志
+      await dtuOperationLogService.log({
+        mac: DevMac,
+        operation: type,
+        content,
+        success: false,
+        message: 'Node节点无响应，请检查设备状态',
+        operatedBy,
+        useTime: Date.now() - startTime,
+        nodeName: terminal.mountNode,
+        error: '操作超时',
+      });
+
       resolve({ ok: 0, msg: 'Node节点无响应，请检查设备状态' });
     }, 10000);
 
     // 监听 DTU 操作结果
-    this.once(eventName, (result: OprateDtuResultRequest) => {
+    this.once(eventName, async (result: OprateDtuResultRequest) => {
       // 清理超时定时器
       clearTimeout(timeoutId);
+
+      const useTime = Date.now() - startTime;
+
+      // 记录操作日志
+      await dtuOperationLogService.log({
+        mac: DevMac,
+        operation: type,
+        content,
+        success: result.success,
+        message: result.message,
+        data: result.data,
+        operatedBy,
+        useTime,
+        nodeName: terminal.mountNode,
+        error: result.success ? undefined : result.message,
+      });
 
       resolve({
         ok: result.success ? 1 : 0,

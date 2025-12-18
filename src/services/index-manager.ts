@@ -367,6 +367,16 @@ export class IndexManager {
         ],
       },
 
+      {
+        collection: 'log.dtuoperations',
+        indexes: [
+          { key: { mac: 1, operatedAt: -1 } },
+          { key: { operation: 1, operatedAt: -1 } },
+          { key: { operatedBy: 1, operatedAt: -1 } },
+          { key: { operatedAt: -1 }, options: { expireAfterSeconds: 7776000 } }, // 90 天
+        ],
+      },
+
       // ============ 其他集合 (4个) ============
       {
         collection: 'node.clients',
