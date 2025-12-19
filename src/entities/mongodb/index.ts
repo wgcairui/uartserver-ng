@@ -52,19 +52,19 @@ export interface CollectionConfig {
 export const PHASE3_COLLECTIONS: CollectionConfig[] = [
   {
     name: ALARM_RULE_COLLECTION,
-    indexes: ALARM_RULE_INDEXES,
+    indexes: ALARM_RULE_INDEXES as unknown as IndexDescription[],
   },
   {
     name: ALARM_COLLECTION,
-    indexes: ALARM_INDEXES,
+    indexes: ALARM_INDEXES as unknown as IndexDescription[],
   },
   {
     name: NOTIFICATION_LOG_COLLECTION,
-    indexes: NOTIFICATION_LOG_INDEXES,
+    indexes: NOTIFICATION_LOG_INDEXES as unknown as IndexDescription[],
   },
   {
     name: USER_ALARM_SETUP_COLLECTION,
-    indexes: USER_ALARM_SETUP_INDEXES,
+    indexes: USER_ALARM_SETUP_INDEXES as unknown as IndexDescription[],
   },
 ];
 
