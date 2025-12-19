@@ -1,11 +1,15 @@
 /**
  * DTU 操作控制器
  * 提供 DTU 远程操作的 REST API 接口
+ *
+ * 架构层级：
+ * Controller → Domain Service (terminalOperationService) → Entity + Infrastructure Service
  */
 
 import { Controller, Get, Post } from '../decorators/controller';
 import { Body, Query, Params, User } from '../decorators/params';
-import { socketIoService } from '../services/socket-io.service';
+import { terminalOperationService } from '../domain/terminal-operation.service';
+import { terminalRepository } from '../repositories/terminal.repository';
 import { dtuOperationLogService } from '../services/dtu-operation-log.service';
 import type { DtuOperationType } from '../types/socket-events';
 import { logger } from '../utils/logger';
@@ -106,8 +110,18 @@ export class DtuController {
         };
       }
 
+      // 获取终端实体
+      const terminal = await terminalRepository.findByMac(mac);
+      if (!terminal) {
+        return {
+          success: false,
+          message: '设备不存在',
+        };
+      }
+
+      // 调用领域服务
       const operatedBy = userId || 'unknown';
-      const result = await socketIoService.OprateDTU(mac, 'restart', undefined, operatedBy);
+      const result = await terminalOperationService.restart(terminal, operatedBy);
 
       return {
         success: result.ok === 1,
@@ -149,8 +163,18 @@ export class DtuController {
         };
       }
 
+      // 获取终端实体
+      const terminal = await terminalRepository.findByMac(mac);
+      if (!terminal) {
+        return {
+          success: false,
+          message: '设备不存在',
+        };
+      }
+
+      // 调用领域服务
       const operatedBy = userId || 'unknown';
-      const result = await socketIoService.OprateDTU(mac, 'restart485', undefined, operatedBy);
+      const result = await terminalOperationService.restart485(terminal, operatedBy);
 
       return {
         success: result.ok === 1,
@@ -200,8 +224,18 @@ export class DtuController {
         };
       }
 
+      // 获取终端实体
+      const terminal = await terminalRepository.findByMac(mac);
+      if (!terminal) {
+        return {
+          success: false,
+          message: '设备不存在',
+        };
+      }
+
+      // 调用领域服务
       const operatedBy = userId || 'unknown';
-      const result = await socketIoService.OprateDTU(mac, 'updateMount', content, operatedBy);
+      const result = await terminalOperationService.updateMount(terminal, content, operatedBy);
 
       return {
         success: result.ok === 1,
@@ -251,8 +285,18 @@ export class DtuController {
         };
       }
 
+      // 获取终端实体
+      const terminal = await terminalRepository.findByMac(mac);
+      if (!terminal) {
+        return {
+          success: false,
+          message: '设备不存在',
+        };
+      }
+
+      // 调用领域服务
       const operatedBy = userId || 'unknown';
-      const result = await socketIoService.OprateDTU(mac, 'OprateInstruct', content, operatedBy);
+      const result = await terminalOperationService.sendInstruct(terminal, content, operatedBy);
 
       return {
         success: result.ok === 1,
@@ -302,8 +346,18 @@ export class DtuController {
         };
       }
 
+      // 获取终端实体
+      const terminal = await terminalRepository.findByMac(mac);
+      if (!terminal) {
+        return {
+          success: false,
+          message: '设备不存在',
+        };
+      }
+
+      // 调用领域服务
       const operatedBy = userId || 'unknown';
-      const result = await socketIoService.OprateDTU(mac, 'setTerminal', content, operatedBy);
+      const result = await terminalOperationService.setTerminal(terminal, content, operatedBy);
 
       return {
         success: result.ok === 1,
@@ -345,8 +399,18 @@ export class DtuController {
         };
       }
 
+      // 获取终端实体
+      const terminal = await terminalRepository.findByMac(mac);
+      if (!terminal) {
+        return {
+          success: false,
+          message: '设备不存在',
+        };
+      }
+
+      // 调用领域服务
       const operatedBy = userId || 'unknown';
-      const result = await socketIoService.OprateDTU(mac, 'getTerminal', undefined, operatedBy);
+      const result = await terminalOperationService.getTerminal(terminal, operatedBy);
 
       return {
         success: result.ok === 1,

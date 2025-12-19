@@ -332,4 +332,83 @@ export class TerminalEntity {
 
     return this;
   }
+
+  // ============================================
+  // 业务规则验证方法（用于领域服务）
+  // ============================================
+
+  /**
+   * 检查终端是否可以进行操作（重启、配置等）
+   * @returns 是否可以操作
+   */
+  canOperate(): boolean {
+    return this.data.online && !!this.data.mountNode;
+  }
+
+  /**
+   * 检查终端是否可以进行查询
+   * @returns 是否可以查询
+   */
+  canQuery(): boolean {
+    // 查询比操作更宽松，离线也可以查询（会走缓存）
+    return !!this.data.mountNode;
+  }
+
+  /**
+   * 检查是否有挂载节点
+   * @returns 是否有节点
+   */
+  hasNode(): boolean {
+    return !!this.data.mountNode;
+  }
+
+  /**
+   * 获取操作验证错误列表
+   * @returns 错误消息数组
+   */
+  getOperationValidationErrors(): string[] {
+    const errors: string[] = [];
+
+    if (!this.data.online) {
+      errors.push('设备离线');
+    }
+
+    if (!this.data.mountNode) {
+      errors.push('设备未挂载到节点');
+    }
+
+    return errors;
+  }
+
+  /**
+   * 获取查询验证错误列表
+   * @returns 错误消息数组
+   */
+  getQueryValidationErrors(): string[] {
+    const errors: string[] = [];
+
+    if (!this.data.mountNode) {
+      errors.push('设备未挂载到节点');
+    }
+
+    return errors;
+  }
+
+  /**
+   * 检查指定的挂载设备是否在线
+   * @param pid - 设备 PID
+   * @returns 是否在线
+   */
+  isMountDeviceOnline(pid: number): boolean {
+    const mountDev = this.data.mountDevs?.find((d) => d.pid === pid);
+    return mountDev?.online ?? false;
+  }
+
+  /**
+   * 检查终端是否有在线的挂载设备
+   * @returns 是否有在线设备
+   */
+  hasOnlineMountDevices(): boolean {
+    return this.data.mountDevs?.some((d) => d.online) ?? false;
+  }
 }
