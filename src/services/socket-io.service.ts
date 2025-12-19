@@ -41,6 +41,7 @@ import { socketUserService } from './socket-user.service';
 import { logger } from '../utils/logger';
 import { config } from '../config';
 import { terminalCache } from '../repositories/terminal-cache';
+import { socketIoMetrics } from './metrics/socketio-metrics';
 
 /**
  * Node Socket 信息 (缓存在内存中)
@@ -287,6 +288,9 @@ class SocketIoService extends EventEmitter {
     >
   ): void {
     logger.info(`Node client connected: ${socket.id} from ${socket.handshake.address}`);
+
+    // 记录连接指标
+    socketIoMetrics.recordConnection();
 
     // 注册事件处理器
     this.registerEventHandlers(socket);
@@ -661,6 +665,10 @@ class SocketIoService extends EventEmitter {
     _data: HeartbeatRequest,
     callback: (response: HeartbeatResponse) => void
   ): void {
+    // 记录心跳事件
+    socketIoMetrics.heartbeatsTotal.inc();
+    socketIoMetrics.eventsTotal.inc({ event_type: 'heartbeat' });
+
     // 更新心跳时间
     socket.data.lastHeartbeat = new Date();
 
@@ -686,6 +694,10 @@ class SocketIoService extends EventEmitter {
     >,
     data: TerminalOnlineRequest
   ): Promise<void> {
+    // 记录终端上线事件
+    socketIoMetrics.terminalOnlineEventsTotal.inc();
+    socketIoMetrics.eventsTotal.inc({ event_type: 'terminal_online' });
+
     try {
       const nodeInfo = this.nodeMap.get(socket.id);
       if (!nodeInfo) {
@@ -738,6 +750,10 @@ class SocketIoService extends EventEmitter {
     >,
     data: TerminalOfflineRequest
   ): Promise<void> {
+    // 记录终端下线事件
+    socketIoMetrics.terminalOfflineEventsTotal.inc();
+    socketIoMetrics.eventsTotal.inc({ event_type: 'terminal_offline' });
+
     try {
       const nodeInfo = this.nodeMap.get(socket.id);
       if (!nodeInfo) {
@@ -750,6 +766,9 @@ class SocketIoService extends EventEmitter {
 
       // 从缓存中移除
       this.terminalCache.delete(data.mac);
+
+      // 更新缓存大小指标
+      socketIoMetrics.updateCacheSize('terminals', this.terminalCache.size);
 
       // 通知 Repository 缓存：终端下线，设置 TTL
       terminalCache.onTerminalOffline(data.mac);
@@ -1006,11 +1025,17 @@ class SocketIoService extends EventEmitter {
   ): void {
     logger.info(`Node client disconnected: ${socket.id}, reason: ${reason}`);
 
+    // 记录断开连接指标
+    socketIoMetrics.recordDisconnection(reason);
+
     const nodeInfo = this.nodeMap.get(socket.id);
     if (nodeInfo) {
       // 清理缓存
       this.nodeMap.delete(socket.id);
       this.nodeNameMap.delete(nodeInfo.Name);
+
+      // 更新缓存大小指标
+      socketIoMetrics.updateCacheSize('nodes', this.nodeMap.size);
 
       // 将该 Node 上的所有终端标记为离线
       this.markTerminalsOffline(socket.id);
@@ -1125,6 +1150,8 @@ class SocketIoService extends EventEmitter {
     if (!this.nodeInfoInterval) {
       this.nodeInfoInterval = setInterval(() => {
         this.nodeInfo();
+        // 同时更新缓存指标
+        this.updateCacheMetrics();
       }, this.NODE_INFO_INTERVAL);
       logger.info('NodeInfo task started (interval: 1 minute)');
     }
@@ -1144,6 +1171,30 @@ class SocketIoService extends EventEmitter {
       }, this.CLEAR_NODEMAP_INTERVAL);
       logger.info('ClearNodeMap task started (interval: 1 hour)');
     }
+
+    // 立即执行一次缓存指标更新
+    this.updateCacheMetrics();
+  }
+
+  /**
+   * 更新缓存大小指标
+   */
+  private updateCacheMetrics(): void {
+    // 更新各类缓存大小
+    socketIoMetrics.updateCacheSize('nodes', this.nodeMap.size);
+    socketIoMetrics.updateCacheSize('terminals', this.terminalCache.size);
+    socketIoMetrics.updateCacheSize('protocols', this.proMap.size);
+    socketIoMetrics.updateCacheSize('queries', this.queryCache.size);
+    socketIoMetrics.updateCacheSize('instructions', this.CacheQueryInstruct.size);
+
+    // 更新终端在线数
+    const onlineCount = Array.from(this.terminalCache.values()).filter(t => t.online).length;
+    socketIoMetrics.updateTerminalsOnline(onlineCount);
+
+    // 更新注册终端总数
+    socketIoMetrics.updateTerminalsRegistered(this.terminalCache.size);
+
+    logger.debug(`Cache metrics updated: nodes=${this.nodeMap.size}, terminals=${this.terminalCache.size}, online=${onlineCount}`);
   }
 
   /**
@@ -1458,6 +1509,9 @@ async InstructQuery(
   pid: number,
   content: string
 ): Promise<InstructQueryResult> {
+  // 开始计时
+  const endTimer = socketIoMetrics.queryDuration.startTimer();
+
   const terminal = await terminalService.getTerminal(DevMac);
   if (!terminal) {
     throw new Error('设备不存在');
@@ -1465,11 +1519,15 @@ async InstructQuery(
 
   const socketId = this.nodeNameMap.get(terminal.mountNode);
   if (!socketId) {
+    socketIoMetrics.queriesTotal.inc({ status: 'error' });
+    endTimer();
     return { ok: 0, msg: '设备所在节点离线' };
   }
 
   const socket = this.io?.of('/node').sockets.get(socketId);
   if (!socket) {
+    socketIoMetrics.queriesTotal.inc({ status: 'error' });
+    endTimer();
     return { ok: 0, msg: '设备所在节点离线' };
   }
 
@@ -1495,6 +1553,9 @@ async InstructQuery(
     // 设置超时定时器
     const timeoutId = setTimeout(() => {
       this.removeAllListeners(eventName);
+      // 记录超时指标
+      socketIoMetrics.queriesTotal.inc({ status: 'timeout' });
+      endTimer();
       resolve({ ok: 0, msg: 'Node节点无响应，请检查设备状态' });
     }, Interval * 2);
 
@@ -1503,9 +1564,17 @@ async InstructQuery(
       // 清理超时定时器
       clearTimeout(timeoutId);
 
+      // 记录查询结果指标
       if (result.success) {
+        socketIoMetrics.queriesTotal.inc({ status: 'success' });
+        socketIoMetrics.queryResultsTotal.inc({ result_status: 'ok' });
         terminalService.updateMountDeviceOnlineStatus(DevMac, pid, true);
+      } else {
+        socketIoMetrics.queriesTotal.inc({ status: 'error' });
+        socketIoMetrics.queryResultsTotal.inc({ result_status: 'error' });
       }
+      endTimer();
+
       resolve({
         ok: result.success ? 1 : 0,
         msg: result.error || '查询成功',
@@ -1539,10 +1608,20 @@ async OprateDTU(
   operatedBy: string = 'system'
 ): Promise<OprateDtuResult> {
   const startTime = Date.now();
+
+  // 记录 DTU 操作总数
+  socketIoMetrics.dtuOperationsTotal.inc({ operation: type });
+
+  // 开始计时 DTU 操作延迟
+  const endTimer = socketIoMetrics.dtuOperationDuration.startTimer({ operation: type });
+
   const terminal = await terminalService.getTerminal(DevMac);
 
   if (!terminal) {
-    // 记录失败日志
+    // 记录失败指标和日志
+    socketIoMetrics.dtuOperationResultsTotal.inc({ operation: type, result_status: 'error' });
+    endTimer();
+
     await dtuOperationLogService.log({
       mac: DevMac,
       operation: type,
@@ -1558,7 +1637,10 @@ async OprateDTU(
 
   const socketId = this.nodeNameMap.get(terminal.mountNode);
   if (!socketId) {
-    // 记录失败日志
+    // 记录失败指标和日志
+    socketIoMetrics.dtuOperationResultsTotal.inc({ operation: type, result_status: 'error' });
+    endTimer();
+
     await dtuOperationLogService.log({
       mac: DevMac,
       operation: type,
@@ -1575,7 +1657,10 @@ async OprateDTU(
 
   const socket = this.io?.of('/node').sockets.get(socketId);
   if (!socket) {
-    // 记录失败日志
+    // 记录失败指标和日志
+    socketIoMetrics.dtuOperationResultsTotal.inc({ operation: type, result_status: 'error' });
+    endTimer();
+
     await dtuOperationLogService.log({
       mac: DevMac,
       operation: type,
@@ -1596,6 +1681,10 @@ async OprateDTU(
     // 设置超时定时器
     const timeoutId = setTimeout(async () => {
       this.removeAllListeners(eventName);
+
+      // 记录超时指标
+      socketIoMetrics.dtuOperationResultsTotal.inc({ operation: type, result_status: 'timeout' });
+      endTimer();
 
       // 记录超时日志
       await dtuOperationLogService.log({
@@ -1619,6 +1708,14 @@ async OprateDTU(
       clearTimeout(timeoutId);
 
       const useTime = Date.now() - startTime;
+
+      // 记录操作结果指标
+      if (result.success) {
+        socketIoMetrics.dtuOperationResultsTotal.inc({ operation: type, result_status: 'ok' });
+      } else {
+        socketIoMetrics.dtuOperationResultsTotal.inc({ operation: type, result_status: 'error' });
+      }
+      endTimer();
 
       // 记录操作日志
       await dtuOperationLogService.log({

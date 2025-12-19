@@ -1,0 +1,269 @@
+# Prometheus 告警规则
+# UART Server NG 监控告警
+
+groups:
+  # 服务可用性告警
+  - name: service_availability
+    interval: 30s
+    rules:
+      - alert: ServiceDown
+        expr: up{job="uartserver-ng"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: availability
+        annotations:
+          summary: "服务不可用"
+          description: "UART Server NG 服务已停止响应超过 1 分钟"
+
+      - alert: DatabaseDisconnected
+        expr: uartserver_mongodb_connection_status == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: database
+        annotations:
+          summary: "数据库连接断开"
+          description: "MongoDB 连接已断开超过 1 分钟，所有数据库操作将失败"
+
+  # 性能告警
+  - name: performance_alerts
+    interval: 30s
+    rules:
+      - alert: HighQueryLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(uartserver_socketio_query_duration_seconds_bucket[5m])) by (le)
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "查询延迟过高"
+          description: "P95 查询延迟超过 2 秒，当前值: {{ $value | humanizeDuration }}"
+
+      - alert: HighQueryTimeoutRate
+        expr: |
+          (
+            rate(uartserver_socketio_queries_total{status="timeout"}[5m])
+            /
+            rate(uartserver_socketio_queries_total[5m])
+          ) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "查询超时率过高"
+          description: "过去 5 分钟查询超时率超过 10%，当前: {{ $value | humanizePercentage }}"
+
+      - alert: HighDatabaseLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(uartserver_mongodb_operation_duration_seconds_bucket[5m])) by (le)
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+          category: database
+        annotations:
+          summary: "数据库操作延迟过高"
+          description: "P95 数据库操作延迟超过 1 秒，当前值: {{ $value | humanizeDuration }}"
+
+  # 错误率告警
+  - name: error_rate_alerts
+    interval: 30s
+    rules:
+      - alert: HighQueryErrorRate
+        expr: |
+          (
+            rate(uartserver_socketio_queries_total{status=~"timeout|error"}[5m])
+            /
+            rate(uartserver_socketio_queries_total[5m])
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          category: errors
+        annotations:
+          summary: "查询错误率过高"
+          description: "过去 5 分钟查询错误率超过 5%，当前: {{ $value | humanizePercentage }}"
+
+      - alert: HighWebSocketPushFailureRate
+        expr: |
+          (
+            rate(uartserver_websocket_push_failures_total[5m])
+            /
+            (
+              rate(uartserver_websocket_device_updates_sent_total[5m]) +
+              rate(uartserver_websocket_batch_device_updates_sent_total[5m]) +
+              rate(uartserver_websocket_push_failures_total[5m])
+            )
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          category: errors
+        annotations:
+          summary: "WebSocket 推送失败率过高"
+          description: "过去 5 分钟推送失败率超过 5%，当前: {{ $value | humanizePercentage }}"
+
+      - alert: HighAuthenticationFailureRate
+        expr: |
+          (
+            rate(uartserver_websocket_authentication_failures_total[5m])
+            /
+            (
+              rate(uartserver_websocket_authenticated_connections_total[5m]) +
+              rate(uartserver_websocket_authentication_failures_total[5m])
+            )
+          ) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          category: security
+        annotations:
+          summary: "认证失败率过高"
+          description: "过去 5 分钟认证失败率超过 10%，可能存在安全问题，当前: {{ $value | humanizePercentage }}"
+
+  # 资源使用告警
+  - name: resource_alerts
+    interval: 30s
+    rules:
+      - alert: HighConnectionCount
+        expr: uartserver_socketio_connections_active > 1000
+        for: 5m
+        labels:
+          severity: warning
+          category: resources
+        annotations:
+          summary: "连接数过高"
+          description: "Node 客户端连接数超过 1000，当前: {{ $value }}"
+
+      - alert: HighCacheSize
+        expr: uartserver_socketio_cache_size{cache_type="terminals"} > 10000
+        for: 10m
+        labels:
+          severity: warning
+          category: resources
+        annotations:
+          summary: "缓存大小过大"
+          description: "终端缓存大小超过 10000，可能存在内存泄漏，当前: {{ $value }}"
+
+      - alert: LowTerminalOnlineRate
+        expr: |
+          (
+            uartserver_socketio_terminals_online
+            /
+            uartserver_socketio_terminals_registered_total
+          ) < 0.3
+        for: 10m
+        labels:
+          severity: warning
+          category: business
+        annotations:
+          summary: "终端在线率过低"
+          description: "终端在线率低于 30%，当前: {{ $value | humanizePercentage }}"
+
+  # 异常模式检测
+  - name: anomaly_detection
+    interval: 1m
+    rules:
+      - alert: ConnectionsDrop
+        expr: |
+          (
+            uartserver_socketio_connections_active
+            <
+            avg_over_time(uartserver_socketio_connections_active[1h]) * 0.5
+          )
+          and
+          (
+            avg_over_time(uartserver_socketio_connections_active[1h]) > 5
+          )
+        for: 5m
+        labels:
+          severity: critical
+          category: anomaly
+        annotations:
+          summary: "连接数异常下降"
+          description: "当前连接数比过去 1 小时平均值低 50%，当前: {{ $value }}，平均: {{ with printf `avg_over_time(uartserver_socketio_connections_active[1h])` | query }}{{ . | first | value }}{{ end }}"
+
+      - alert: SuddenQuerySpike
+        expr: |
+          rate(uartserver_socketio_queries_total[1m])
+          >
+          avg_over_time(rate(uartserver_socketio_queries_total[1m])[1h:1m]) * 3
+        for: 2m
+        labels:
+          severity: warning
+          category: anomaly
+        annotations:
+          summary: "查询量突增"
+          description: "查询量突然增加到过去 1 小时平均值的 3 倍以上"
+
+  # 数据库告警
+  - name: database_alerts
+    interval: 30s
+    rules:
+      - alert: HighDatabaseConnectionErrors
+        expr: rate(uartserver_mongodb_connection_errors_total[5m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+          category: database
+        annotations:
+          summary: "数据库连接错误频繁"
+          description: "过去 5 分钟数据库连接错误频率超过 1 次/秒"
+
+      - alert: DatabaseHealthCheckFailing
+        expr: |
+          (
+            rate(uartserver_mongodb_health_check_failure_total[5m])
+            /
+            (
+              rate(uartserver_mongodb_health_check_success_total[5m]) +
+              rate(uartserver_mongodb_health_check_failure_total[5m])
+            )
+          ) > 0.5
+        for: 5m
+        labels:
+          severity: critical
+          category: database
+        annotations:
+          summary: "数据库健康检查失败率过高"
+          description: "过去 5 分钟数据库健康检查失败率超过 50%"
+
+  # 业务指标告警
+  - name: business_alerts
+    interval: 1m
+    rules:
+      - alert: HighInstructTimeoutCount
+        expr: increase(uartserver_socketio_instruct_timeouts_total[10m]) > 100
+        for: 5m
+        labels:
+          severity: warning
+          category: business
+        annotations:
+          summary: "指令超时次数过多"
+          description: "过去 10 分钟指令超时次数超过 100 次，影响数据采集质量"
+
+      - alert: HighAlarmCount
+        expr: increase(uartserver_socketio_alarms_total[10m]) > 50
+        for: 5m
+        labels:
+          severity: warning
+          category: business
+        annotations:
+          summary: "告警事件频繁"
+          description: "过去 10 分钟告警事件超过 50 次，可能存在系统性问题"
+
+      - alert: NoActiveSubscriptions
+        expr: uartserver_websocket_subscriptions_active == 0 and uartserver_websocket_connections_active > 0
+        for: 10m
+        labels:
+          severity: info
+          category: business
+        annotations:
+          summary: "无活跃订阅"
+          description: "有 WebSocket 连接但没有活跃订阅，用户可能未正常使用功能"

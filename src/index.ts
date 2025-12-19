@@ -18,6 +18,7 @@ import { DtuController } from './controllers/dtu.controller';
 import { socketService } from './services/socket.service';
 import { socketIoService } from './services/socket-io.service';
 import { webSocketService } from './services/websocket.service';
+import { metricsService } from './services/metrics.service';
 
 /**
  * 创建并配置 Fastify 应用
@@ -134,6 +135,19 @@ async function createApp() {
         healthy: dbHealthy,
       },
     };
+  });
+
+  // Prometheus 指标端点
+  app.get('/metrics', async (request, reply) => {
+    try {
+      const metrics = await metricsService.getMetrics();
+      reply
+        .type(metricsService.getContentType())
+        .send(metrics);
+    } catch (error) {
+      app.log.error('Failed to get metrics:', error);
+      reply.code(500).send({ error: 'Failed to retrieve metrics' });
+    }
   });
 
   // 根路径

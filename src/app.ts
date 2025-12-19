@@ -20,6 +20,7 @@ import { socketIoService } from './services/socket-io.service';
 import { socketUserService } from './services/socket-user.service';
 import { terminalCache } from './repositories/terminal-cache';
 import { terminalRepository } from './repositories/terminal.repository';
+import { metricsService } from './services/metrics.service';
 
 /**
  * 构建并配置 Fastify 应用（用于测试）
@@ -174,6 +175,19 @@ export async function build(options: {
         healthy: dbHealthy,
       },
     };
+  });
+
+  // Prometheus 指标端点
+  app.get('/metrics', async (request, reply) => {
+    try {
+      const metrics = await metricsService.getMetrics();
+      reply
+        .type(metricsService.getContentType())
+        .send(metrics);
+    } catch (error) {
+      app.log.error('Failed to get metrics:', error);
+      reply.code(500).send({ error: 'Failed to retrieve metrics' });
+    }
   });
 
   // 根路径

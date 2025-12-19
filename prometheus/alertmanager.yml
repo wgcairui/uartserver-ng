@@ -1,0 +1,138 @@
+# AlertManager 配置文件
+# 配置告警通知路由和接收器
+
+global:
+  resolve_timeout: 5m
+  # SMTP 配置（QQ 邮箱）
+  # 使用 STARTTLS 端口 587（AlertManager 推荐配置）
+  smtp_smarthost: 'smtp.qq.com:587'
+  smtp_from: '260338538@qq.com'
+  smtp_auth_username: '260338538@qq.com'
+  smtp_auth_password: 'awywixplpmjmcaef'
+  smtp_require_tls: true
+
+# 告警路由配置
+route:
+  # 默认分组
+  group_by: ['alertname', 'cluster', 'service']
+
+  # 分组等待时间
+  group_wait: 10s
+
+  # 同一组告警之间的等待时间
+  group_interval: 10s
+
+  # 重复告警的间隔时间
+  repeat_interval: 12h
+
+  # 默认接收器
+  receiver: 'default'
+
+  # 子路由
+  routes:
+    # 严重告警立即发送
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+      group_wait: 0s
+      repeat_interval: 5m
+
+    # 数据库告警
+    - match:
+        category: database
+      receiver: 'database-team'
+      group_by: ['alertname']
+
+    # 性能告警
+    - match:
+        category: performance
+      receiver: 'performance-alerts'
+      group_wait: 30s
+      group_interval: 5m
+
+    # 业务告警
+    - match:
+        category: business
+      receiver: 'business-team'
+
+# 接收器配置
+receivers:
+  # 默认接收器（Webhook）
+  - name: 'default'
+    webhook_configs:
+      - url: 'http://localhost:8080/webhook/alerts'
+        send_resolved: true
+
+  # 严重告警（仅邮件通知）
+  - name: 'critical-alerts'
+    # 邮件通知
+    email_configs:
+      - to: 'wgcairui@icloud.com'
+        send_resolved: true
+        headers:
+          Subject: '{{ template "email.default.subject" . }}'
+        html: '{{ template "email.default.html" . }}'
+
+    # 企业微信通知（未配置）
+    # wechat_configs:
+    #   - corp_id: 'your_corp_id'
+    #     api_url: 'https://qyapi.weixin.qq.com/cgi-bin/'
+    #     api_secret: 'your_secret'
+    #     to_user: '@all'
+    #     agent_id: 'your_agent_id'
+    #     message: |
+    #       【紧急告警】
+    #       告警名称: {{ .GroupLabels.alertname }}
+    #       {{ range .Alerts }}
+    #       描述: {{ .Annotations.description }}
+    #       {{ end }}
+
+    # Webhook 通知（已禁用 - 生产环境时配置）
+    # webhook_configs:
+    #   - url: 'http://localhost:8080/webhook/critical'
+    #     send_resolved: true
+
+  # 数据库团队
+  - name: 'database-team'
+    webhook_configs:
+      - url: 'http://localhost:8080/webhook/database'
+        send_resolved: true
+
+  # 性能告警
+  - name: 'performance-alerts'
+    webhook_configs:
+      - url: 'http://localhost:8080/webhook/performance'
+        send_resolved: true
+
+  # 业务团队
+  - name: 'business-team'
+    webhook_configs:
+      - url: 'http://localhost:8080/webhook/business'
+        send_resolved: true
+
+# 告警抑制规则
+inhibit_rules:
+  # 服务宕机时抑制所有其他告警
+  - source_match:
+      alertname: 'ServiceDown'
+    target_match_re:
+      alertname: '.*'
+    equal: ['instance']
+
+  # 数据库断开时抑制数据库相关告警
+  - source_match:
+      alertname: 'DatabaseDisconnected'
+    target_match:
+      category: 'database'
+    equal: ['instance']
+
+  # 严重告警会抑制警告级别告警
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'instance']
+
+# 告警模板
+templates:
+  - '/etc/alertmanager/alert-templates.tmpl'

@@ -5,6 +5,7 @@
 
 import { MongoClient, Db, Collection, Document, MongoClientOptions } from 'mongodb';
 import { derivedConfig } from '../config';
+import { databaseMetrics } from '../services/metrics/database-metrics';
 
 /**
  * MongoDB 连接管理器类
@@ -49,13 +50,24 @@ export class MongoDBManager {
     };
 
     this.client = new MongoClient(derivedConfig.mongodbUri, options);
+
+    // 添加命令监控监听器
+    this.setupMonitoring(this.client);
+
     await this.client.connect();
 
     // 提取数据库名称
     const dbName = this.extractDatabaseName(derivedConfig.mongodbUri);
     this.db = this.client.db(dbName);
 
+    // 记录连接成功
+    databaseMetrics.recordConnectionStatus(true);
+    databaseMetrics.recordConnectionCreated();
+
     console.log(`✓ MongoDB 已连接: ${dbName}`);
+
+    // 启动连接池监控
+    this.startPoolMonitoring();
   }
 
   /**
@@ -67,11 +79,101 @@ export class MongoDBManager {
   }
 
   /**
+   * 设置 MongoDB 命令监控
+   */
+  private setupMonitoring(client: MongoClient): void {
+    // 命令开始监控 - 记录开始时间
+    const commandStartTimes = new Map<number, number>();
+
+    client.on('commandStarted', (event) => {
+      commandStartTimes.set(event.requestId, Date.now());
+    });
+
+    // 命令成功监控
+    client.on('commandSucceeded', (event) => {
+      const startTime = commandStartTimes.get(event.requestId);
+      if (startTime) {
+        const duration = Date.now() - startTime;
+        databaseMetrics.recordOperation(event.commandName, duration, false);
+        commandStartTimes.delete(event.requestId);
+      }
+    });
+
+    // 命令失败监控
+    client.on('commandFailed', (event) => {
+      const startTime = commandStartTimes.get(event.requestId);
+      if (startTime) {
+        const duration = Date.now() - startTime;
+        databaseMetrics.recordOperation(event.commandName, duration, true);
+        commandStartTimes.delete(event.requestId);
+      }
+    });
+
+    // 连接池事件监控
+    client.on('connectionCreated', () => {
+      databaseMetrics.recordConnectionCreated();
+    });
+
+    client.on('connectionClosed', () => {
+      databaseMetrics.recordConnectionClosed();
+    });
+
+    client.on('connectionCheckOutFailed', () => {
+      databaseMetrics.recordConnectionError();
+    });
+  }
+
+  /**
+   * 启动连接池监控
+   * 定期更新连接池指标
+   */
+  private poolMonitoringInterval: NodeJS.Timeout | null = null;
+
+  private startPoolMonitoring(): void {
+    // 每 10 秒更新一次连接池指标
+    this.poolMonitoringInterval = setInterval(() => {
+      if (!this.client) return;
+
+      try {
+        // 注意：MongoDB Node.js Driver 没有直接暴露连接池统计信息的 API
+        // 这里我们只能记录配置的最大和最小连接池大小
+        // 实际的活跃连接数需要通过 APM 或其他监控工具获取
+        databaseMetrics.updatePoolMetrics({
+          poolSize: 50, // maxPoolSize 配置值
+          activeConnections: 0, // 无法直接获取，需要使用 APM
+          availableConnections: 0, // 无法直接获取
+          waitQueueSize: 0, // 无法直接获取
+        });
+      } catch (error) {
+        console.error('Failed to update pool metrics:', error);
+      }
+    }, 10000);
+  }
+
+  /**
+   * 停止连接池监控
+   */
+  private stopPoolMonitoring(): void {
+    if (this.poolMonitoringInterval) {
+      clearInterval(this.poolMonitoringInterval);
+      this.poolMonitoringInterval = null;
+    }
+  }
+
+  /**
    * 断开 MongoDB 连接
    */
   async disconnect(): Promise<void> {
     if (this.client) {
+      // 停止连接池监控
+      this.stopPoolMonitoring();
+
       await this.client.close();
+
+      // 记录断开连接
+      databaseMetrics.recordConnectionStatus(false);
+      databaseMetrics.recordConnectionClosed();
+
       this.client = null;
       this.db = null;
       console.log('✓ MongoDB 已断开连接');
@@ -116,14 +218,26 @@ export class MongoDBManager {
    * 健康检查
    */
   async healthCheck(): Promise<boolean> {
+    const startTime = Date.now();
+
     try {
       if (!this.isConnected()) {
+        const duration = Date.now() - startTime;
+        databaseMetrics.recordHealthCheck(false, duration);
         return false;
       }
+
       // 执行 ping 命令
       await this.getDatabase().admin().ping();
+
+      const duration = Date.now() - startTime;
+      databaseMetrics.recordHealthCheck(true, duration);
+
       return true;
     } catch (error) {
+      const duration = Date.now() - startTime;
+      databaseMetrics.recordHealthCheck(false, duration);
+
       console.error('MongoDB 健康检查失败:', error);
       return false;
     }
@@ -138,6 +252,7 @@ export class MongoDBManager {
     collections: number;
   }> {
     if (!this.isConnected()) {
+      databaseMetrics.updateCollectionsCount(0);
       return {
         connected: false,
         database: '',
@@ -146,6 +261,9 @@ export class MongoDBManager {
     }
 
     const collections = await this.getDatabase().listCollections().toArray();
+
+    // 更新集合数量指标
+    databaseMetrics.updateCollectionsCount(collections.length);
 
     return {
       connected: true,

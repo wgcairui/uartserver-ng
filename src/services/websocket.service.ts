@@ -26,6 +26,7 @@ import { extractUserId, extractUsername } from '../types/jwt';
 import { mongodb } from '../database/mongodb';
 import { logger } from '../utils/logger';
 import { config } from '../config';
+import { webSocketMetrics } from './metrics/websocket-metrics';
 
 /**
  * 用户 Socket 类型
@@ -100,6 +101,9 @@ export class WebSocketService {
     const userId = socket.data.userId || 'anonymous';
     logger.info(`User connected: ${userId} (${socket.id})`);
 
+    // 记录连接指标
+    webSocketMetrics.recordConnection(socket.data.authenticated);
+
     // 认证事件
     socket.on('auth', async (data: UserAuthRequest, callback) => {
       try {
@@ -142,6 +146,11 @@ export class WebSocketService {
     // 心跳事件
     socket.on('heartbeat', (data: UserHeartbeatRequest, callback) => {
       socket.data.lastHeartbeat = new Date();
+
+      // 记录心跳事件
+      webSocketMetrics.heartbeatsTotal.inc();
+      webSocketMetrics.eventsTotal.inc({ event_type: 'heartbeat' });
+
       callback({
         timestamp: data.timestamp,
         serverTime: Date.now(),
@@ -169,6 +178,8 @@ export class WebSocketService {
     try {
       const decoded = await this.verifyToken(data.token);
       if (!decoded) {
+        // 记录认证失败
+        webSocketMetrics.recordAuthenticationFailure();
         return {
           success: false,
           message: 'Invalid token',
@@ -179,6 +190,9 @@ export class WebSocketService {
       socket.data.userId = decoded.userId;
       socket.data.username = decoded.username;
       socket.data.authenticated = true;
+
+      // 记录认证成功
+      webSocketMetrics.authenticatedConnectionsTotal.inc();
 
       logger.info(`User authenticated: ${decoded.userId}`);
 
@@ -191,6 +205,8 @@ export class WebSocketService {
       };
     } catch (error) {
       logger.error('Authentication error:', error);
+      // 记录认证失败
+      webSocketMetrics.recordAuthenticationFailure();
       return {
         success: false,
         message: 'Authentication failed',
@@ -296,6 +312,12 @@ export class WebSocketService {
       }
       this.userSubscriptions.get(userId)!.add(room);
 
+      // 记录订阅操作
+      webSocketMetrics.recordSubscription('subscribe');
+
+      // 更新房间统计信息
+      this.updateRoomMetrics();
+
       logger.info(`User ${userId} subscribed to ${room}`);
 
       return {
@@ -337,6 +359,12 @@ export class WebSocketService {
         this.roomSubscribers.delete(room);
       }
 
+      // 记录取消订阅操作
+      webSocketMetrics.recordSubscription('unsubscribe');
+
+      // 更新房间统计信息
+      this.updateRoomMetrics();
+
       logger.info(`User ${userId} unsubscribed from ${room}`);
 
       return {
@@ -359,6 +387,9 @@ export class WebSocketService {
     const userId = socket.data.userId || socket.id;
     logger.info(`User disconnected: ${userId}, reason: ${reason}`);
 
+    // 记录断开连接指标
+    webSocketMetrics.recordDisconnection(reason);
+
     // 清理订阅缓存
     for (const room of socket.data.subscriptions) {
       this.roomSubscribers.get(room)?.delete(userId);
@@ -368,6 +399,9 @@ export class WebSocketService {
     }
 
     this.userSubscriptions.delete(userId);
+
+    // 更新房间统计信息
+    this.updateRoomMetrics();
   }
 
   /**
@@ -376,16 +410,25 @@ export class WebSocketService {
   pushToRoom(room: string, update: DeviceUpdate): void {
     if (!this.io) {
       logger.warn('WebSocket service not initialized');
+      webSocketMetrics.recordPushFailure();
       return;
     }
 
-    const userNamespace = this.io.of('/user');
-    userNamespace.to(room).emit('update', update);
+    try {
+      const userNamespace = this.io.of('/user');
+      userNamespace.to(room).emit('update', update);
 
-    logger.debug(`Pushed update to room ${room}`, {
-      type: update.type,
-      subscriberCount: this.roomSubscribers.get(room)?.size || 0,
-    });
+      // 记录设备更新推送
+      webSocketMetrics.recordDeviceUpdate();
+
+      logger.debug(`Pushed update to room ${room}`, {
+        type: update.type,
+        subscriberCount: this.roomSubscribers.get(room)?.size || 0,
+      });
+    } catch (error) {
+      logger.error('Failed to push update:', error);
+      webSocketMetrics.recordPushFailure();
+    }
   }
 
   /**
@@ -394,6 +437,7 @@ export class WebSocketService {
   pushBatchToRoom(room: string, updates: DeviceUpdate[]): void {
     if (!this.io) {
       logger.warn('WebSocket service not initialized');
+      webSocketMetrics.recordPushFailure();
       return;
     }
 
@@ -401,18 +445,26 @@ export class WebSocketService {
       return;
     }
 
-    const userNamespace = this.io.of('/user');
-    const batch: BatchDeviceUpdate = {
-      updates,
-      timestamp: Date.now(),
-    };
+    try {
+      const userNamespace = this.io.of('/user');
+      const batch: BatchDeviceUpdate = {
+        updates,
+        timestamp: Date.now(),
+      };
 
-    userNamespace.to(room).emit('batchUpdate', batch);
+      userNamespace.to(room).emit('batchUpdate', batch);
 
-    logger.debug(`Pushed batch update to room ${room}`, {
-      count: updates.length,
-      subscriberCount: this.roomSubscribers.get(room)?.size || 0,
-    });
+      // 记录批量设备更新推送
+      webSocketMetrics.recordBatchDeviceUpdate();
+
+      logger.debug(`Pushed batch update to room ${room}`, {
+        count: updates.length,
+        subscriberCount: this.roomSubscribers.get(room)?.size || 0,
+      });
+    } catch (error) {
+      logger.error('Failed to push batch update:', error);
+      webSocketMetrics.recordPushFailure();
+    }
   }
 
   /**
@@ -470,7 +522,13 @@ export class WebSocketService {
           }
         }
       });
+
+      // 更新房间统计信息
+      this.updateRoomMetrics();
     }, 30000); // 每 30 秒检查一次
+
+    // 立即执行一次房间指标更新
+    this.updateRoomMetrics();
   }
 
   /**
@@ -503,6 +561,26 @@ export class WebSocketService {
     }
 
     return subscriptions;
+  }
+
+  /**
+   * 更新房间统计指标
+   */
+  private updateRoomMetrics(): void {
+    const roomCount = this.roomSubscribers.size;
+    let totalSubscribers = 0;
+
+    for (const subscribers of this.roomSubscribers.values()) {
+      totalSubscribers += subscribers.size;
+    }
+
+    webSocketMetrics.updateRoomStats(roomCount, totalSubscribers);
+
+    logger.debug(
+      `Room metrics updated: rooms=${roomCount}, totalSubscribers=${totalSubscribers}, avgSubscribers=${
+        roomCount > 0 ? (totalSubscribers / roomCount).toFixed(2) : 0
+      }`
+    );
   }
 
   /**

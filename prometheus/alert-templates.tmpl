@@ -1,0 +1,312 @@
+{{ define "__subject" }}
+[{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ .GroupLabels.alertname }}
+{{ end }}
+
+{{ define "__alert_severity_prefix" -}}
+{{ if ne .Labels.severity "" -}}
+{{ if eq .Labels.severity "critical" -}}
+🔴 严重
+{{- else if eq .Labels.severity "warning" -}}
+🟡 警告
+{{- else if eq .Labels.severity "info" -}}
+🔵 提示
+{{- else -}}
+⚪ {{ .Labels.severity }}
+{{- end }}
+{{- else -}}
+⚪ 未知
+{{- end }}
+{{- end }}
+
+{{ define "__alert_severity_prefix_title" -}}
+{{ if ne .CommonLabels.severity "" -}}
+{{ if eq .CommonLabels.severity "critical" -}}
+🔴 【严重告警】
+{{- else if eq .CommonLabels.severity "warning" -}}
+🟡 【警告告警】
+{{- else if eq .CommonLabels.severity "info" -}}
+🔵 【提示信息】
+{{- else -}}
+⚪ 【{{ .CommonLabels.severity }}】
+{{- end }}
+{{- else -}}
+⚪ 【告警通知】
+{{- end }}
+{{- end }}
+
+{{ define "email.default.subject" }}
+{{ template "__alert_severity_prefix_title" . }} {{ .GroupLabels.alertname }}
+{{ end }}
+
+{{ define "email.default.html" }}
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px 8px 0 0;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+        }
+        .header p {
+            margin: 10px 0 0 0;
+            opacity: 0.9;
+        }
+        .status-box {
+            padding: 15px;
+            margin: 0;
+            border-radius: 0 0 8px 8px;
+            font-weight: bold;
+            text-align: center;
+        }
+        .status-firing {
+            background-color: #fee;
+            color: #c00;
+            border-left: 4px solid #c00;
+        }
+        .status-resolved {
+            background-color: #efe;
+            color: #070;
+            border-left: 4px solid #070;
+        }
+        .alert {
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        .alert-critical {
+            border-left: 4px solid #dc3545;
+        }
+        .alert-warning {
+            border-left: 4px solid #ffc107;
+        }
+        .alert-info {
+            border-left: 4px solid #17a2b8;
+        }
+        .alert-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #ddd;
+        }
+        .alert-name {
+            font-size: 18px;
+            font-weight: bold;
+            color: #333;
+        }
+        .alert-severity {
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .severity-critical {
+            background-color: #dc3545;
+            color: white;
+        }
+        .severity-warning {
+            background-color: #ffc107;
+            color: #333;
+        }
+        .severity-info {
+            background-color: #17a2b8;
+            color: white;
+        }
+        .alert-description {
+            margin: 10px 0;
+            padding: 10px;
+            background: white;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .alert-details {
+            margin-top: 10px;
+        }
+        .detail-row {
+            display: flex;
+            padding: 5px 0;
+            border-bottom: 1px solid #eee;
+        }
+        .detail-label {
+            font-weight: bold;
+            width: 120px;
+            color: #666;
+        }
+        .detail-value {
+            flex: 1;
+            color: #333;
+        }
+        .footer {
+            margin-top: 30px;
+            padding: 15px;
+            background: #f5f5f5;
+            border-radius: 8px;
+            text-align: center;
+            font-size: 12px;
+            color: #666;
+        }
+        .footer a {
+            color: #667eea;
+            text-decoration: none;
+        }
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            margin: 10px 5px;
+            background: #667eea;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .btn:hover {
+            background: #764ba2;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🚨 UART Server NG 告警通知</h1>
+        <p>{{ .ExternalURL }}</p>
+    </div>
+
+    <div class="status-box {{ if eq .Status "firing" }}status-firing{{ else }}status-resolved{{ end }}">
+        {{ if eq .Status "firing" }}
+            ⚠️ 告警触发 - 共 {{ .Alerts.Firing | len }} 个告警
+        {{ else }}
+            ✅ 告警已恢复 - 共 {{ .Alerts.Resolved | len }} 个告警已解决
+        {{ end }}
+    </div>
+
+    {{ if gt (len .Alerts.Firing) 0 }}
+    <h2 style="margin-top: 30px; color: #dc3545;">🔥 触发中的告警</h2>
+    {{ range .Alerts.Firing }}
+    <div class="alert alert-{{ .Labels.severity }}">
+        <div class="alert-header">
+            <div class="alert-name">
+                {{ template "__alert_severity_prefix" . }} {{ .Labels.alertname }}
+            </div>
+            <span class="alert-severity severity-{{ .Labels.severity }}">
+                {{ .Labels.severity | toUpper }}
+            </span>
+        </div>
+
+        {{ if .Annotations.description }}
+        <div class="alert-description">
+            <strong>📝 描述：</strong> {{ .Annotations.description }}
+        </div>
+        {{ end }}
+
+        {{ if .Annotations.summary }}
+        <div class="alert-description">
+            <strong>📋 摘要：</strong> {{ .Annotations.summary }}
+        </div>
+        {{ end }}
+
+        <div class="alert-details">
+            <div class="detail-row">
+                <div class="detail-label">⏰ 开始时间</div>
+                <div class="detail-value">{{ .StartsAt.Format "2006-01-02 15:04:05" }}</div>
+            </div>
+            {{ if .Labels.instance }}
+            <div class="detail-row">
+                <div class="detail-label">🖥️ 实例</div>
+                <div class="detail-value">{{ .Labels.instance }}</div>
+            </div>
+            {{ end }}
+            {{ if .Labels.job }}
+            <div class="detail-row">
+                <div class="detail-label">💼 任务</div>
+                <div class="detail-value">{{ .Labels.job }}</div>
+            </div>
+            {{ end }}
+            {{ if .Labels.category }}
+            <div class="detail-row">
+                <div class="detail-label">📂 类别</div>
+                <div class="detail-value">{{ .Labels.category }}</div>
+            </div>
+            {{ end }}
+        </div>
+    </div>
+    {{ end }}
+    {{ end }}
+
+    {{ if gt (len .Alerts.Resolved) 0 }}
+    <h2 style="margin-top: 30px; color: #28a745;">✅ 已恢复的告警</h2>
+    {{ range .Alerts.Resolved }}
+    <div class="alert" style="border-left: 4px solid #28a745;">
+        <div class="alert-header">
+            <div class="alert-name">
+                ✅ {{ .Labels.alertname }}
+            </div>
+            <span class="alert-severity" style="background-color: #28a745; color: white;">
+                已恢复
+            </span>
+        </div>
+
+        {{ if .Annotations.description }}
+        <div class="alert-description">
+            <strong>📝 描述：</strong> {{ .Annotations.description }}
+        </div>
+        {{ end }}
+
+        <div class="alert-details">
+            <div class="detail-row">
+                <div class="detail-label">⏰ 开始时间</div>
+                <div class="detail-value">{{ .StartsAt.Format "2006-01-02 15:04:05" }}</div>
+            </div>
+            <div class="detail-row">
+                <div class="detail-label">⏱️ 恢复时间</div>
+                <div class="detail-value">{{ .EndsAt.Format "2006-01-02 15:04:05" }}</div>
+            </div>
+            <div class="detail-row">
+                <div class="detail-label">⏳ 持续时长</div>
+                <div class="detail-value">{{ .EndsAt.Sub .StartsAt }}</div>
+            </div>
+            {{ if .Labels.instance }}
+            <div class="detail-row">
+                <div class="detail-label">🖥️ 实例</div>
+                <div class="detail-value">{{ .Labels.instance }}</div>
+            </div>
+            {{ end }}
+        </div>
+    </div>
+    {{ end }}
+    {{ end }}
+
+    <div style="text-align: center; margin-top: 30px;">
+        <a href="{{ .ExternalURL }}" class="btn">🔍 查看 AlertManager</a>
+        <a href="{{ .ExternalURL }}/../prometheus" class="btn">📊 查看 Prometheus</a>
+        <a href="{{ .ExternalURL }}/../..:3000" class="btn">📈 查看 Grafana</a>
+    </div>
+
+    <div class="footer">
+        <p><strong>UART Server NG 监控系统</strong></p>
+        <p>本邮件由 Prometheus AlertManager 自动发送</p>
+        <p style="margin-top: 10px;">
+            如有问题，请联系运维团队<br>
+            <a href="mailto:ops-team@company.com">ops-team@company.com</a>
+        </p>
+    </div>
+</body>
+</html>
+{{ end }}

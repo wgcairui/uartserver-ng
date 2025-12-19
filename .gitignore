@@ -47,3 +47,6 @@ temp/
 # Debug
 .vscode-test/
 .env*
+
+# 监控系统环境变量（包含敏感信息）
+.env.monitoring

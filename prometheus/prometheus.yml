@@ -1,0 +1,65 @@
+# Prometheus 配置文件
+# UART Server NG 监控配置
+
+global:
+  scrape_interval: 10s # 默认抓取间隔
+  evaluation_interval: 10s # 评估规则间隔
+  external_labels:
+    cluster: 'uartserver-ng'
+    environment: 'production'
+
+# 告警管理器配置
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+# 告警规则文件
+rule_files:
+  - 'alerts.yml'
+
+# 抓取配置
+scrape_configs:
+  # UART Server NG 应用指标
+  - job_name: 'uartserver-ng'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+    metrics_path: '/metrics'
+    static_configs:
+      - targets:
+          # Docker 环境使用 host.docker.internal
+          # Linux 使用 172.17.0.1 或宿主机 IP
+          - 'host.docker.internal:9010'
+        labels:
+          app: 'uartserver-ng'
+          service: 'main'
+          version: '2.0.0'
+
+  # Prometheus 自身指标
+  - job_name: 'prometheus'
+    static_configs:
+      - targets:
+          - 'localhost:9090'
+        labels:
+          app: 'prometheus'
+
+  # Grafana 指标（可选）
+  - job_name: 'grafana'
+    static_configs:
+      - targets:
+          - 'grafana:3000'
+        labels:
+          app: 'grafana'
+
+# 远程写入配置（可选，用于长期存储）
+# remote_write:
+#   - url: "http://your-remote-storage:9009/api/v1/push"
+#     queue_config:
+#       capacity: 10000
+#       max_shards: 50
+#       max_samples_per_send: 5000
+
+# 远程读取配置（可选）
+# remote_read:
+#   - url: "http://your-remote-storage:9009/api/v1/read"

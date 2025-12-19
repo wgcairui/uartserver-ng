@@ -1,0 +1,16 @@
+# Grafana 仪表板自动配置
+# 此文件会在 Grafana 启动时自动加载仪表板
+
+apiVersion: 1
+
+providers:
+  - name: 'UART Server NG Dashboards'
+    orgId: 1
+    folder: 'UART Server NG'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false
