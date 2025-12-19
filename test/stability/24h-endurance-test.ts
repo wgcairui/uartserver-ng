@@ -295,8 +295,18 @@ class StabilityTest {
 
     this.metrics.push(metrics);
 
+    // 内存优化：只保留最近 100 个指标快照（避免无限增长）
+    if (this.metrics.length > 100) {
+      this.metrics = this.metrics.slice(-100);
+    }
+
     // 清空响应时间数组（保持内存占用稳定）
     this.responseTimes = [];
+
+    // 限制错误数组大小（只保留最近 100 个错误）
+    if (this.errors.length > 100) {
+      this.errors = this.errors.slice(-100);
+    }
 
     // 记录关键指标
     const elapsed = Date.now() - this.startTime;

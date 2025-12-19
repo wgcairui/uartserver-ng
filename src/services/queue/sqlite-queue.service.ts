@@ -298,8 +298,9 @@ export class SQLiteQueueService implements QueueService {
     };
 
     for (const row of rows as any[]) {
-      if (row.status in stats) {
-        stats[row.status as keyof QueueStats] = row.count;
+      const status = row.status as string;
+      if (status === 'pending' || status === 'processing' || status === 'completed' || status === 'failed') {
+        stats[status] = row.count;
       }
     }
 

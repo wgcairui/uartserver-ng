@@ -9,7 +9,7 @@
  * - 告警去重
  */
 
-import type { ParsedData, DataPoint } from './data-parsing.service';
+import type { ParsedData } from './data-parsing.service';
 
 /**
  * 告警级别
@@ -79,11 +79,11 @@ export interface Alarm {
   /** 终端 MAC */
   mac: string;
   /** 设备 PID */
-  pid: string;
+  pid: number | string;
   /** 参数名称 */
   paramName?: string;
   /** 当前值 */
-  currentValue?: number | string;
+  currentValue?: number | string | boolean;
   /** 触发条件描述 */
   conditionDesc: string;
   /** 告警消息 */
@@ -305,7 +305,7 @@ export class AlarmRuleEngineService {
    *
    * TODO: 实现安全的脚本执行环境
    */
-  private evaluateCustomRule(rule: AlarmRule, data: ParsedData): Alarm | null {
+  private evaluateCustomRule(_rule: AlarmRule, _data: ParsedData): Alarm | null {
     console.warn('[AlarmRuleEngine] Custom rule evaluation not implemented yet');
     return null;
   }

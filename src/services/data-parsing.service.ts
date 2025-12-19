@@ -9,7 +9,15 @@
  */
 
 import type { QueryResult } from '../schemas/query-data.schema';
-import type { Protocol } from '../types/entities/protocol.entity';
+
+/**
+ * Protocol definition (temporary - TODO: import from actual entity)
+ */
+interface Protocol {
+  name: string;
+  type: string;
+  // Add more fields as needed
+}
 
 /**
  * 解析后的数据结构
@@ -18,7 +26,7 @@ export interface ParsedData {
   /** 终端 MAC 地址 */
   mac: string;
   /** 设备 PID */
-  pid: string;
+  pid: number | string;  // Support both number (from QueryResult) and string
   /** 协议名称 */
   protocol: string;
   /** 解析后的数据点 */
@@ -132,14 +140,14 @@ export class DataParsingService {
         name: 'temperature',
         value: 25.5,
         unit: '°C',
-        type: 'number',
+        type: 'number' as const,
         isValid: true,
       },
       {
         name: 'humidity',
         value: 60,
         unit: '%',
-        type: 'number',
+        type: 'number' as const,
         isValid: true,
       },
     ];
@@ -202,11 +210,14 @@ export class DataParsingService {
     }
 
     // 枚举值检查
-    if (rule.enumValues && !rule.enumValues.includes(point.value)) {
-      return {
-        isValid: false,
-        error: `Value ${point.value} is not in allowed values: ${rule.enumValues.join(', ')}`,
-      };
+    if (rule.enumValues) {
+      const valueMatches = rule.enumValues.some(enumVal => enumVal === point.value);
+      if (!valueMatches) {
+        return {
+          isValid: false,
+          error: `Value ${point.value} is not in allowed values: ${rule.enumValues.join(', ')}`,
+        };
+      }
     }
 
     // 正则表达式检查

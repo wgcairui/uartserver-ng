@@ -143,8 +143,8 @@ export class AlarmNotificationService {
    * TODO: 从数据库查询订阅该设备的用户
    */
   private async getAlarmSubscribers(
-    mac: string,
-    pid: string
+    _mac: string,
+    _pid: number | string
   ): Promise<UserNotificationPreference[]> {
     // 临时：返回示例用户
     const exampleUsers: UserNotificationPreference[] = [
@@ -312,6 +312,7 @@ export class AlarmNotificationService {
     // await this.emailService.send(email, subject, body);
 
     console.log('[AlarmNotification] Email subject:', subject);
+    console.log('[AlarmNotification] Email body length:', body.length);
   }
 
   /**
