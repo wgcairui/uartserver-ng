@@ -205,6 +205,77 @@
 
 ---
 
+## 🔧 服务层集成
+
+### AlarmRuleEngineService 集成示例
+
+告警规则引擎服务使用 MongoDB 实体进行规则管理和告警持久化：
+
+```typescript
+import { mongodb } from '../database/mongodb';
+import { AlarmRuleEngineService } from '../services/alarm-rule-engine.service';
+
+// 创建告警规则引擎实例
+const alarmEngine = new AlarmRuleEngineService(mongodb.getDatabase());
+
+// 添加阈值规则
+const ruleId = await alarmEngine.addRule(
+  createThresholdRule(
+    '温度超限告警',
+    'modbus',
+    'temperature',
+    -10,
+    80,
+    'warning',
+    'admin'
+  )
+);
+
+// 评估数据并检测告警
+const result = await alarmEngine.evaluateData(parsedData);
+```
+
+### AlarmNotificationService 集成示例
+
+告警通知服务从 MongoDB 查询用户订阅信息并持久化通知日志：
+
+```typescript
+import { mongodb } from '../database/mongodb';
+import { AlarmNotificationService } from '../services/alarm-notification.service';
+
+// 创建通知服务实例
+const notificationService = new AlarmNotificationService(
+  mongodb.getDatabase(),
+  queueService // 可选的任务队列服务
+);
+
+// 发送告警通知
+await notificationService.sendAlarmNotification(alarm);
+
+// 获取通知统计
+const stats = await notificationService.getNotificationStats('user-1');
+```
+
+### 数据库初始化流程
+
+应用启动时自动初始化 Phase 3 集合和索引：
+
+```typescript
+// src/database/mongodb.ts
+import { initializePhase3Collections } from '../entities/mongodb';
+
+// 在 MongoDB 连接建立后自动初始化
+await mongodb.connect();
+// ✓ MongoDB 已连接: uart_server
+// [Phase3] Initializing collections and indexes...
+// [Phase3] Created collection: alarm.rules
+// [Phase3] Created index: alarm.rules.enabled_type_idx
+// ...
+// [Phase3] Collections and indexes initialized successfully
+```
+
+---
+
 ## 🔧 数据访问模式
 
 ### 类型安全的集合访问

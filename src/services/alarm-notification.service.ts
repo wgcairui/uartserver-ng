@@ -6,16 +6,27 @@
  * - 短信通知
  * - 邮件通知
  * - 通知去重
- * - 通知日志
+ * - 通知日志持久化
+ *
+ * 使用 MongoDB 实体持久化数据
  */
 
-import type { Alarm, AlarmLevel } from './alarm-rule-engine.service';
+import type { Db, ObjectId } from 'mongodb';
+import {
+  Phase3Collections,
+  type AlarmDocument,
+  type AlarmLevel,
+  type NotificationChannel,
+  createWechatLog,
+  createSmsLog,
+  createMailLog,
+  markNotificationSent,
+  markNotificationFailed,
+  type WechatParams,
+  type SmsParams,
+  type MailParams,
+} from '../entities/mongodb';
 import type { QueueService } from './queue/queue.interface';
-
-/**
- * 通知渠道
- */
-export type NotificationChannel = 'wechat' | 'sms' | 'email';
 
 /**
  * 用户通知偏好
@@ -27,12 +38,12 @@ export interface UserNotificationPreference {
   channels: NotificationChannel[];
   /** 接收的告警级别 */
   alarmLevels: AlarmLevel[];
-  /** 微信 OpenID */
-  wechatOpenId?: string;
-  /** 手机号 */
-  phone?: string;
-  /** 邮箱 */
-  email?: string;
+  /** 微信 OpenID 列表 */
+  wechatOpenIds: string[];
+  /** 手机号列表 */
+  phones: string[];
+  /** 邮箱列表 */
+  emails: string[];
 }
 
 /**
@@ -40,16 +51,16 @@ export interface UserNotificationPreference {
  */
 export interface NotificationJob {
   /** 告警对象 */
-  alarm: Alarm;
+  alarm: AlarmDocument;
   /** 用户 ID */
   userId: string;
   /** 通知渠道 */
   channel: NotificationChannel;
   /** 用户联系信息 */
   contact: {
-    wechatOpenId?: string;
-    phone?: string;
-    email?: string;
+    wechatOpenIds?: string[];
+    phones?: string[];
+    emails?: string[];
   };
 }
 
@@ -65,22 +76,28 @@ export interface NotificationResult {
   error?: string;
   /** 发送时间 */
   sentAt: Date;
+  /** 日志 ID */
+  logId?: ObjectId;
 }
 
 /**
  * Alarm Notification Service
  */
 export class AlarmNotificationService {
+  /** MongoDB 集合访问器 */
+  private collections: Phase3Collections;
+
   /** 队列服务 */
   private queueService?: QueueService;
 
-  /** 通知去重缓存 (key: userId:alarmRuleId, value: last sent time) */
+  /** 通知去重缓存 (key: userId:alarmId, value: last sent time) */
   private notificationCache: Map<string, number> = new Map();
 
   /** 去重时间窗口 (秒) */
   private readonly DEDUP_WINDOW = 300; // 5 分钟
 
-  constructor(queueService?: QueueService) {
+  constructor(db: Db, queueService?: QueueService) {
+    this.collections = new Phase3Collections(db);
     this.queueService = queueService;
 
     // 注册通知处理器
@@ -98,11 +115,11 @@ export class AlarmNotificationService {
    *
    * @param alarm - 告警对象
    */
-  async sendAlarmNotification(alarm: Alarm): Promise<void> {
-    console.log(`[AlarmNotification] Processing alarm: ${alarm.ruleName}`);
+  async sendAlarmNotification(alarm: AlarmDocument): Promise<void> {
+    console.log(`[AlarmNotification] Processing alarm: ${alarm.msg}`);
 
     // 1. 获取订阅该设备告警的用户
-    const subscribers = await this.getAlarmSubscribers(alarm.mac, alarm.pid);
+    const subscribers = await this.getAlarmSubscribers(alarm.mac, alarm.pid, alarm.protocol);
 
     if (subscribers.length === 0) {
       console.log(`[AlarmNotification] No subscribers for ${alarm.mac}:${alarm.pid}`);
@@ -122,7 +139,7 @@ export class AlarmNotificationService {
       }
 
       // 检查去重
-      if (!this.shouldSendNotification(user.userId, alarm.ruleId)) {
+      if (!this.shouldSendNotification(user.userId, alarm._id?.toString() || '')) {
         console.log(`[AlarmNotification] Notification deduplicated for user ${user.userId}`);
         continue;
       }
@@ -133,37 +150,65 @@ export class AlarmNotificationService {
       }
 
       // 记录通知发送时间
-      this.recordNotificationSent(user.userId, alarm.ruleId);
+      this.recordNotificationSent(user.userId, alarm._id?.toString() || '');
     }
   }
 
   /**
-   * 获取告警订阅用户
+   * 获取告警订阅用户 (从 MongoDB 查询)
    *
-   * TODO: 从数据库查询订阅该设备的用户
+   * 查询 user.alarmsetups 集合,找到订阅了该协议的用户
    */
   private async getAlarmSubscribers(
-    _mac: string,
-    _pid: number | string
+    mac: string,
+    pid: number | string,
+    protocol: string
   ): Promise<UserNotificationPreference[]> {
-    // 临时：返回示例用户
-    const exampleUsers: UserNotificationPreference[] = [
-      {
-        userId: 'user-1',
-        channels: ['wechat'],
-        alarmLevels: ['warning', 'error', 'critical'],
-        wechatOpenId: 'wx-openid-example',
-      },
-    ];
+    console.log(`[AlarmNotification] Querying subscribers for ${mac}:${pid} (${protocol})`);
 
-    return exampleUsers;
+    try {
+      // 查询订阅了该协议的用户
+      const userSetups = await this.collections.userAlarmSetups
+        .find({
+          'ProtocolSetup.Protocol': protocol,
+        })
+        .toArray();
+
+      console.log(`[AlarmNotification] Found ${userSetups.length} potential subscribers`);
+
+      // 转换为 UserNotificationPreference 格式
+      const subscribers: UserNotificationPreference[] = userSetups.map((setup) => {
+        // 确定启用的通知渠道
+        const channels: NotificationChannel[] = [];
+        if (setup.wxs && setup.wxs.length > 0) channels.push('wechat');
+        if (setup.tels && setup.tels.length > 0) channels.push('sms');
+        if (setup.mails && setup.mails.length > 0) channels.push('email');
+
+        // 默认订阅所有级别的告警
+        const alarmLevels: AlarmLevel[] = ['info', 'warning', 'error', 'critical'];
+
+        return {
+          userId: setup.user,
+          channels,
+          alarmLevels,
+          wechatOpenIds: setup.wxs || [],
+          phones: setup.tels || [],
+          emails: setup.mails || [],
+        };
+      });
+
+      return subscribers;
+    } catch (error) {
+      console.error('[AlarmNotification] Error querying subscribers:', error);
+      return [];
+    }
   }
 
   /**
    * 将通知任务加入队列
    */
   private async queueNotification(
-    alarm: Alarm,
+    alarm: AlarmDocument,
     user: UserNotificationPreference,
     channel: NotificationChannel
   ): Promise<void> {
@@ -172,9 +217,9 @@ export class AlarmNotificationService {
       userId: user.userId,
       channel,
       contact: {
-        wechatOpenId: user.wechatOpenId,
-        phone: user.phone,
-        email: user.email,
+        wechatOpenIds: user.wechatOpenIds,
+        phones: user.phones,
+        emails: user.emails,
       },
     };
 
@@ -202,70 +247,117 @@ export class AlarmNotificationService {
 
     console.log(`[AlarmNotification] Processing ${channel} notification for user ${userId}`);
 
+    let logId: ObjectId | undefined;
+
     try {
       switch (channel) {
         case 'wechat':
-          await this.sendWeChatNotification(alarm, contact.wechatOpenId!);
+          if (!contact.wechatOpenIds || contact.wechatOpenIds.length === 0) {
+            throw new Error('No WeChat OpenID available');
+          }
+          logId = await this.sendWeChatNotification(alarm, userId, contact.wechatOpenIds);
           break;
         case 'sms':
-          await this.sendSmsNotification(alarm, contact.phone!);
+          if (!contact.phones || contact.phones.length === 0) {
+            throw new Error('No phone number available');
+          }
+          logId = await this.sendSmsNotification(alarm, userId, contact.phones);
           break;
         case 'email':
-          await this.sendEmailNotification(alarm, contact.email!);
+          if (!contact.emails || contact.emails.length === 0) {
+            throw new Error('No email address available');
+          }
+          logId = await this.sendEmailNotification(alarm, userId, contact.emails);
           break;
       }
 
-      // TODO: 记录通知日志到数据库
       console.log(`[AlarmNotification] ${channel} notification sent successfully`);
 
       return {
         success: true,
         channel,
         sentAt: new Date(),
+        logId,
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error(`[AlarmNotification] Failed to send ${channel} notification:`, error);
 
-      // TODO: 记录失败日志到数据库
+      // 记录失败日志
+      if (logId) {
+        await this.markNotificationFailed(logId, error, false);
+      }
 
       return {
         success: false,
         channel,
         error: errorMessage,
         sentAt: new Date(),
+        logId,
       };
     }
   }
 
   /**
-   * 发送微信通知
+   * 发送微信通知并持久化日志
    *
-   * TODO: 集成微信模板消息 API
+   * @returns 通知日志 ID
    */
-  private async sendWeChatNotification(alarm: Alarm, openId: string): Promise<void> {
-    console.log(`[AlarmNotification] Sending WeChat notification to ${openId}`);
+  private async sendWeChatNotification(
+    alarm: AlarmDocument,
+    userId: string,
+    openIds: string[]
+  ): Promise<ObjectId> {
+    console.log(`[AlarmNotification] Sending WeChat notification to ${openIds.join(', ')}`);
 
     // 格式化消息
-    const message = this.formatWeChatMessage(alarm);
+    const params = this.formatWeChatMessage(alarm);
 
-    // TODO: 调用微信 API
-    // await this.wechatService.sendTemplateMessage(openId, message);
+    // 创建通知日志
+    const alarmId = alarm._id ? alarm._id.toString() : undefined;
+    const log = createWechatLog(userId, openIds[0]!, params, alarmId);
+    const result = await this.collections.notificationLogs.insertOne(log);
+    const logId = result.insertedId;
 
-    console.log('[AlarmNotification] WeChat message:', message);
+    try {
+      // TODO: 调用微信 API
+      // const response = await this.wechatService.sendTemplateMessage(openIds[0], params);
+
+      // 模拟成功响应
+      const mockResponse = {
+        Message: 'OK',
+        RequestId: `mock-${Date.now()}`,
+        BizId: `biz-${Date.now()}`,
+      };
+
+      console.log('[AlarmNotification] WeChat message sent:', mockResponse);
+
+      // 标记为成功
+      await this.collections.notificationLogs.updateOne(
+        { _id: logId },
+        { $set: markNotificationSent(mockResponse) }
+      );
+
+      return logId;
+    } catch (error) {
+      // 标记为失败
+      await this.markNotificationFailed(logId, error, true);
+      throw error;
+    }
   }
 
   /**
    * 格式化微信消息
    */
-  private formatWeChatMessage(alarm: Alarm): any {
+  private formatWeChatMessage(alarm: AlarmDocument): WechatParams {
     return {
+      touser: '', // 将由调用方填充
       template_id: 'ALARM_TEMPLATE_ID',
       data: {
-        first: { value: `【${this.getLevelText(alarm.level)}】${alarm.ruleName}` },
+        first: { value: `【${this.getLevelText(alarm.level)}】${alarm.msg}` },
         keyword1: { value: alarm.mac },
-        keyword2: { value: alarm.pid },
-        keyword3: { value: alarm.message },
+        keyword2: { value: String(alarm.pid) },
+        keyword3: { value: alarm.msg },
         keyword4: { value: alarm.triggeredAt.toLocaleString('zh-CN') },
         remark: { value: '请及时处理' },
       },
@@ -273,53 +365,144 @@ export class AlarmNotificationService {
   }
 
   /**
-   * 发送短信通知
+   * 发送短信通知并持久化日志
    *
-   * TODO: 集成阿里云短信 API
+   * @returns 通知日志 ID
    */
-  private async sendSmsNotification(alarm: Alarm, phone: string): Promise<void> {
-    console.log(`[AlarmNotification] Sending SMS notification to ${phone}`);
+  private async sendSmsNotification(
+    alarm: AlarmDocument,
+    userId: string,
+    phones: string[]
+  ): Promise<ObjectId> {
+    console.log(`[AlarmNotification] Sending SMS notification to ${phones.join(', ')}`);
 
-    // 格式化短信内容
-    const content = `【告警通知】${alarm.ruleName}：${alarm.message}。请及时处理。`;
+    // 格式化短信参数
+    const params: SmsParams = {
+      SignName: '告警通知',
+      TemplateCode: 'SMS_ALARM_TEMPLATE',
+      TemplateParam: JSON.stringify({
+        level: this.getLevelText(alarm.level),
+        message: alarm.msg,
+        time: alarm.triggeredAt.toLocaleString('zh-CN'),
+      }),
+    };
 
-    // TODO: 调用阿里云短信 API
-    // await this.smsService.send(phone, content);
+    // 创建通知日志
+    const alarmId = alarm._id ? alarm._id.toString() : undefined;
+    const log = createSmsLog(userId, phones, params, alarmId);
+    const result = await this.collections.notificationLogs.insertOne(log);
+    const logId = result.insertedId;
 
-    console.log('[AlarmNotification] SMS content:', content);
+    try {
+      // TODO: 调用阿里云短信 API
+      // const response = await this.smsService.send(phones, params);
+
+      // 模拟成功响应
+      const mockResponse = {
+        Message: 'OK',
+        RequestId: `mock-${Date.now()}`,
+        BizId: `biz-${Date.now()}`,
+      };
+
+      console.log('[AlarmNotification] SMS sent:', mockResponse);
+
+      // 标记为成功
+      await this.collections.notificationLogs.updateOne(
+        { _id: logId },
+        { $set: markNotificationSent(mockResponse) }
+      );
+
+      return logId;
+    } catch (error) {
+      // 标记为失败
+      await this.markNotificationFailed(logId, error, true);
+      throw error;
+    }
   }
 
   /**
-   * 发送邮件通知
+   * 发送邮件通知并持久化日志
    *
-   * TODO: 集成 SMTP 邮件发送
+   * @returns 通知日志 ID
    */
-  private async sendEmailNotification(alarm: Alarm, email: string): Promise<void> {
-    console.log(`[AlarmNotification] Sending Email notification to ${email}`);
+  private async sendEmailNotification(
+    alarm: AlarmDocument,
+    userId: string,
+    emails: string[]
+  ): Promise<ObjectId> {
+    console.log(`[AlarmNotification] Sending Email notification to ${emails.join(', ')}`);
 
-    // 格式化邮件内容
-    const subject = `【告警通知】${alarm.ruleName}`;
-    const body = `
-      <h2>${alarm.ruleName}</h2>
+    // 格式化邮件参数
+    const subject = `【告警通知】${alarm.msg}`;
+    const html = `
+      <h2>${alarm.msg}</h2>
       <p><strong>告警级别:</strong> ${this.getLevelText(alarm.level)}</p>
       <p><strong>设备信息:</strong> ${alarm.mac} - ${alarm.pid}</p>
-      <p><strong>告警消息:</strong> ${alarm.message}</p>
+      <p><strong>协议:</strong> ${alarm.protocol}</p>
       <p><strong>触发时间:</strong> ${alarm.triggeredAt.toLocaleString('zh-CN')}</p>
       <p>请及时登录系统查看详情并处理。</p>
     `;
 
-    // TODO: 调用邮件服务
-    // await this.emailService.send(email, subject, body);
+    const params: MailParams = {
+      from: 'noreply@example.com',
+      to: emails[0]!,
+      subject,
+      html,
+    };
 
-    console.log('[AlarmNotification] Email subject:', subject);
-    console.log('[AlarmNotification] Email body length:', body.length);
+    // 创建通知日志
+    const alarmId = alarm._id ? alarm._id.toString() : undefined;
+    const log = createMailLog(userId, emails, params, alarmId);
+    const result = await this.collections.notificationLogs.insertOne(log);
+    const logId = result.insertedId;
+
+    try {
+      // TODO: 调用邮件服务
+      // const response = await this.emailService.send(params);
+
+      // 模拟成功响应
+      const mockResponse = {
+        Message: 'OK',
+        RequestId: `mock-${Date.now()}`,
+      };
+
+      console.log('[AlarmNotification] Email sent:', mockResponse);
+
+      // 标记为成功
+      await this.collections.notificationLogs.updateOne(
+        { _id: logId },
+        { $set: markNotificationSent(mockResponse) }
+      );
+
+      return logId;
+    } catch (error) {
+      // 标记为失败
+      await this.markNotificationFailed(logId, error, true);
+      throw error;
+    }
+  }
+
+  /**
+   * 标记通知发送失败
+   */
+  private async markNotificationFailed(
+    logId: ObjectId,
+    error: any,
+    willRetry: boolean
+  ): Promise<void> {
+    const nextRetryAt = willRetry ? new Date(Date.now() + 60000) : undefined; // 1 分钟后重试
+
+    await this.collections.notificationLogs.updateOne(
+      { _id: logId },
+      { $set: markNotificationFailed(error, willRetry, nextRetryAt) }
+    );
   }
 
   /**
    * 检查是否应该发送通知（去重检查）
    */
-  private shouldSendNotification(userId: string, ruleId: string): boolean {
-    const key = `${userId}:${ruleId}`;
+  private shouldSendNotification(userId: string, alarmId: string): boolean {
+    const key = `${userId}:${alarmId}`;
     const lastSent = this.notificationCache.get(key);
 
     if (!lastSent) return true;
@@ -333,8 +516,8 @@ export class AlarmNotificationService {
   /**
    * 记录通知发送时间
    */
-  private recordNotificationSent(userId: string, ruleId: string): void {
-    const key = `${userId}:${ruleId}`;
+  private recordNotificationSent(userId: string, alarmId: string): void {
+    const key = `${userId}:${alarmId}`;
     this.notificationCache.set(key, Date.now());
   }
 
@@ -372,5 +555,48 @@ export class AlarmNotificationService {
       default:
         return '未知';
     }
+  }
+
+  /**
+   * 获取通知统计
+   *
+   * @param userId - 用户 ID
+   * @param startTime - 开始时间戳
+   * @param endTime - 结束时间戳
+   */
+  async getNotificationStats(
+    userId?: string,
+    startTime?: number,
+    endTime?: number
+  ): Promise<{
+    total: number;
+    sent: number;
+    failed: number;
+    byChannel: Record<NotificationChannel, number>;
+  }> {
+    const filter: any = {};
+
+    if (userId) filter.userId = userId;
+    if (startTime || endTime) {
+      filter.timeStamp = {};
+      if (startTime) filter.timeStamp.$gte = startTime;
+      if (endTime) filter.timeStamp.$lte = endTime;
+    }
+
+    const logs = await this.collections.notificationLogs.find(filter).toArray();
+
+    const stats = {
+      total: logs.length,
+      sent: logs.filter((l) => l.status === 'sent').length,
+      failed: logs.filter((l) => l.status === 'failed').length,
+      byChannel: {
+        wechat: logs.filter((l) => l.channel === 'wechat').length,
+        sms: logs.filter((l) => l.channel === 'sms').length,
+        email: logs.filter((l) => l.channel === 'email').length,
+        webhook: logs.filter((l) => l.channel === 'webhook').length,
+      },
+    };
+
+    return stats;
   }
 }

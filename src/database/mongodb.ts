@@ -6,6 +6,7 @@
 import { MongoClient, Db, Collection, Document, MongoClientOptions } from 'mongodb';
 import { derivedConfig } from '../config';
 import { databaseMetrics } from '../services/metrics/database-metrics';
+import { initializePhase3Collections } from '../entities/mongodb';
 
 /**
  * MongoDB 连接管理器类
@@ -65,6 +66,9 @@ export class MongoDBManager {
     databaseMetrics.recordConnectionCreated();
 
     console.log(`✓ MongoDB 已连接: ${dbName}`);
+
+    // 初始化 Phase 3 集合和索引
+    await initializePhase3Collections(this.db);
 
     // 启动连接池监控
     this.startPoolMonitoring();
