@@ -62,8 +62,9 @@ export class RS485Parser implements IProtocolParser {
 
         // 标准 Modbus 协议校验
         const responsePid = el.buffer.data[0];
-        // 功能码在指令内容的前2个字符 (不含 PID)
-        const functionCode = parseInt(el.content.slice(0, 2), 16);
+        // 功能码在 content 的第 2-4 位 (跳过 PID 的前 2 位)
+        // content 格式: [PID(2位)] + [功能码(2位)] + [地址+数据] + [CRC(4位)]
+        const functionCode = parseInt(el.content.slice(2, 4), 16);
         const resFunctionCode = el.buffer.data[1];
         const resLength = el.buffer.data[2];
 

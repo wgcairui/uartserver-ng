@@ -235,7 +235,7 @@ describe('Data Parsing Service', () => {
       instructMap.set('READ_HOLDING_REGISTER', protocol);
 
       service.setProtocolInstruct('test_modbus', instructMap);
-      service.setContentToName('0300010001', 'READ_HOLDING_REGISTER');
+      service.setContentToName('010300010001', 'READ_HOLDING_REGISTER'); // content 包含 PID
 
       // 模拟 Modbus 响应: PID=1, FunctionCode=03, Length=02, Data=[01 F4], CRC=[xx xx]
       // 01 F4 (大端序) = 500, 系数 0.1 -> 50.0V
@@ -246,7 +246,7 @@ describe('Data Parsing Service', () => {
         type: 485,
         contents: [
           {
-            content: '0300010001',
+            content: '010300010001', // PID(01) + 指令(0300010001)
             buffer: {
               data: [0x01, 0x03, 0x02, 0x01, 0xf4, 0x00, 0x00], // PID, FC, Len, Data, CRC
             },
@@ -280,7 +280,7 @@ describe('Data Parsing Service', () => {
       instructMap.set('READ_FLOAT', protocol);
 
       service.setProtocolInstruct('test_modbus', instructMap);
-      service.setContentToName('0300020002', 'READ_FLOAT');
+      service.setContentToName('010300020002', 'READ_FLOAT'); // content 包含 PID
 
       // Modbus 响应: PID=1, FC=03, Len=04, Data=[42 48 00 00] (50.0), CRC
       const queryResult: QueryResult = {
@@ -290,7 +290,7 @@ describe('Data Parsing Service', () => {
         type: 485,
         contents: [
           {
-            content: '0300020002',
+            content: '010300020002', // PID(01) + 指令(0300020002)
             buffer: {
               data: [0x01, 0x03, 0x04, 0x42, 0x48, 0x00, 0x00, 0x00, 0x00],
             },
@@ -321,7 +321,7 @@ describe('Data Parsing Service', () => {
       instructMap.set('READ_COILS', protocol);
 
       service.setProtocolInstruct('test_modbus', instructMap);
-      service.setContentToName('01000000000A', 'READ_COILS');
+      service.setContentToName('01010000000A', 'READ_COILS'); // PID(01) + 指令(010000000A)
 
       // Modbus 响应: PID=1, FC=01, Len=01, Data=[0b00000101] (bit2: [1,0,1,0,0,0,0,0]), CRC
       const queryResult: QueryResult = {
@@ -331,7 +331,7 @@ describe('Data Parsing Service', () => {
         type: 485,
         contents: [
           {
-            content: '01000000000A',
+            content: '01010000000A', // PID(01) + 指令(010000000A: FC=01,起始=0000,数量=000A)
             buffer: {
               data: [0x01, 0x01, 0x01, 0x05, 0x00, 0x00], // PID, FC, Len, Data=5(0b101), CRC
             },
@@ -359,7 +359,7 @@ describe('Data Parsing Service', () => {
       instructMap.set('READ_REG', protocol);
 
       service.setProtocolInstruct('test_modbus', instructMap);
-      service.setContentToName('0300010001', 'READ_REG');
+      service.setContentToName('010300010001', 'READ_REG'); // content 包含 PID
 
       // PID 不匹配: 响应 PID=2, 查询 PID=1
       const queryResult: QueryResult = {
@@ -369,7 +369,7 @@ describe('Data Parsing Service', () => {
         type: 485,
         contents: [
           {
-            content: '0300010001',
+            content: '010300010001', // PID(01) + 指令(0300010001)
             buffer: {
               data: [0x02, 0x03, 0x02, 0x01, 0xf4, 0x00, 0x00], // 响应 PID=2
             },
@@ -403,7 +403,7 @@ describe('Data Parsing Service', () => {
       instructMap.set('READ_STATUS', protocol);
 
       service.setProtocolInstruct('test_modbus', instructMap);
-      service.setContentToName('0300030001', 'READ_STATUS');
+      service.setContentToName('010300030001', 'READ_STATUS'); // content 包含 PID
 
       // 设置状态映射
       const stateMap = new Map<string, string>();
@@ -420,7 +420,7 @@ describe('Data Parsing Service', () => {
         type: 485,
         contents: [
           {
-            content: '0300030001',
+            content: '010300030001', // PID(01) + 指令(0300030001)
             buffer: {
               data: [0x01, 0x03, 0x02, 0x00, 0x01, 0x00, 0x00], // 状态=1
             },
@@ -470,7 +470,7 @@ describe('Data Parsing Service', () => {
       const instructMap = new Map<string, ProtocolInstruct>();
       instructMap.set('READ_MULTI_REGISTERS', protocol);
       service.setProtocolInstruct('test_modbus', instructMap);
-      service.setContentToName('0300010003', 'READ_MULTI_REGISTERS');
+      service.setContentToName('010300010003', 'READ_MULTI_REGISTERS'); // content 包含 PID
 
       // Modbus 响应: [PID][FC][Len][Data: 01F4 00C8 03E8][CRC]
       // 01F4 (500 * 0.1 = 50.0V) at bytes 1-2
@@ -483,7 +483,7 @@ describe('Data Parsing Service', () => {
         type: 485,
         contents: [
           {
-            content: '0300010003',
+            content: '010300010003', // PID(01) + 指令(0300010003)
             buffer: {
               data: [0x01, 0x03, 0x06, 0x01, 0xf4, 0x00, 0xc8, 0x03, 0xe8, 0x00, 0x00],
             },
@@ -520,7 +520,7 @@ describe('Data Parsing Service', () => {
       const instructMap = new Map<string, ProtocolInstruct>();
       instructMap.set('READ_FLOAT_POWER', protocol);
       service.setProtocolInstruct('test_modbus', instructMap);
-      service.setContentToName('0300020002', 'READ_FLOAT_POWER');
+      service.setContentToName('010300020002', 'READ_FLOAT_POWER'); // content 包含 PID
 
       // Modbus 响应: [PID][FC][Len][Data: 42480000][CRC]
       // 42480000 = 50.0 (IEEE 754)
@@ -531,7 +531,7 @@ describe('Data Parsing Service', () => {
         type: 485,
         contents: [
           {
-            content: '0300020002',
+            content: '010300020002', // PID(01) + 指令(0300020002)
             buffer: {
               data: [0x01, 0x03, 0x04, 0x42, 0x48, 0x00, 0x00, 0x00, 0x00],
             },
