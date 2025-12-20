@@ -95,9 +95,9 @@ describe('Data Parsing Utils', () => {
       expect(result).toBe(50);
     });
 
-    it('should handle unsupported format (return original)', () => {
+    it('should support legacy function expressions (Pocket Solution)', () => {
       const result = parseCoefficient('(val, val * 0.1)', 100);
-      expect(result).toBe(100); // 不支持函数表达式,返回原值
+      expect(result).toBe(10); // 现在支持遗留表达式
     });
   });
 

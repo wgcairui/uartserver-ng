@@ -5,6 +5,7 @@
  */
 
 import { crc16modbus } from 'crc';
+import { parseCoefficient as parseCoefficientImpl } from './coefficient-transforms';
 
 /**
  * 生成 Modbus CRC16 校验码
@@ -185,34 +186,32 @@ export function singleToHex(value: number = 0): Buffer {
 }
 
 /**
- * 应用系数转换 (仅支持数字系数)
+ * 应用系数转换 (支持多种系数格式)
  *
- * 注意: 旧系统支持函数表达式,但因安全考虑暂不实现
- * 如需函数表达式支持,请使用预定义的转换函数映射
+ * 使用分层 fallback 策略:
+ * 1. 数字系数 (98.63%): "0.1", "2" → 直接乘法
+ * 2. 预定义转换 (1.37%): "temp_offset", "array_first", "bit_extract:4:5"
+ * 3. 数学表达式: "val * 0.1 + 32" → mathjs 沙箱求值
+ * 4. 遗留表达式 (Pocket): "(a, a[0])" → 受控动态执行
  *
- * @param coefficient 系数字符串 (数字)
+ * @param coefficient 系数字符串
  * @param value 原始值
  * @returns 转换后的值
  *
  * @example
  * ```typescript
- * parseCoefficient('0.1', 100);  // 10
- * parseCoefficient('2', 50);     // 100
+ * parseCoefficient('0.1', 100);              // 10 (数字系数)
+ * parseCoefficient('temp_offset', 50);       // 5 (预定义转换)
+ * parseCoefficient('(a, a[0])', [42, 99]);   // 42 (遗留表达式)
  * ```
+ *
+ * @see {@link ./coefficient-transforms.ts} 完整实现和安全说明
  */
 export function parseCoefficient(
   coefficient: string,
-  value: number
-): number {
-  // 仅支持数字系数
-  const numCoefficient = Number(coefficient);
-  if (!isNaN(numCoefficient)) {
-    return numCoefficient * value;
-  }
-
-  // 不支持函数表达式,返回原值
-  console.warn(`不支持的系数格式: ${coefficient}, 返回原值`);
-  return value;
+  value: number | any,
+): number | any {
+  return parseCoefficientImpl(coefficient, value);
 }
 
 /**
