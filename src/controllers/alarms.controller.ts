@@ -10,31 +10,19 @@
 
 import { Controller, Get, Post } from '../decorators/controller';
 import { Params, Query, Body } from '../decorators/params';
-import type { Alarm, AlarmLevel } from '../services/alarm-rule-engine.service';
-
-/**
- * 告警查询参数
- */
-export interface AlarmQuery {
-  /** 告警级别 */
-  level?: AlarmLevel;
-  /** 设备 MAC */
-  mac?: string;
-  /** 设备 PID */
-  pid?: string;
-  /** 是否已确认 */
-  acknowledged?: boolean;
-  /** 是否已解决 */
-  resolved?: boolean;
-  /** 开始时间 */
-  startTime?: string;
-  /** 结束时间 */
-  endTime?: string;
-  /** 每页数量 */
-  limit?: number;
-  /** 页码 */
-  page?: number;
-}
+import type { Alarm } from '../services/alarm-rule-engine.service';
+import {
+  ListAlarmsQuerySchema,
+  type ListAlarmsQuery,
+  AlarmIdParamsSchema,
+  type AlarmIdParams,
+  AcknowledgeAlarmBodySchema,
+  type AcknowledgeAlarmBody,
+  ResolveAlarmBodySchema,
+  type ResolveAlarmBody,
+  AlarmStatsQuerySchema,
+  type AlarmStatsQuery,
+} from '../schemas/alarms.schema';
 
 /**
  * Alarms Controller
@@ -47,15 +35,8 @@ export class AlarmsController {
    * GET /api/alarms?level={level}&mac={mac}&acknowledged={ack}&resolved={resolved}
    */
   @Get('/')
-  async listAlarms(
-    @Query('level') level?: string,
-    @Query('mac') mac?: string,
-    @Query('pid') pid?: string,
-    @Query('acknowledged') acknowledged?: string,
-    @Query('resolved') resolved?: string,
-    @Query('limit') limit: string = '50',
-    @Query('page') page: string = '1'
-  ) {
+  async listAlarms(@Query(ListAlarmsQuerySchema) query: ListAlarmsQuery) {
+    const { level, mac, pid, acknowledged, resolved, limit, page } = query;
     console.log('[AlarmsController] List alarms:', {
       level,
       mac,
@@ -72,8 +53,8 @@ export class AlarmsController {
       data: {
         alarms,
         total: alarms.length,
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page,
+        limit,
       },
     };
   }
@@ -84,7 +65,8 @@ export class AlarmsController {
    * GET /api/alarms/:id
    */
   @Get('/:id')
-  async getAlarm(@Params('id') id: string) {
+  async getAlarm(@Params(AlarmIdParamsSchema) params: AlarmIdParams) {
+    const { id } = params;
     console.log(`[AlarmsController] Get alarm: ${id}`);
 
     // TODO: 从数据库查询告警详情
@@ -107,10 +89,11 @@ export class AlarmsController {
    */
   @Post('/:id/acknowledge')
   async acknowledgeAlarm(
-    @Params('id') id: string,
-    @Body('userId') userId?: string,
-    @Body('comment') comment?: string
+    @Params(AlarmIdParamsSchema) params: AlarmIdParams,
+    @Body(AcknowledgeAlarmBodySchema) body: AcknowledgeAlarmBody
   ) {
+    const { id } = params;
+    const { userId, comment } = body;
     console.log(`[AlarmsController] Acknowledge alarm: ${id} by ${userId}`);
 
     // TODO: 更新告警状态为已确认
@@ -140,10 +123,11 @@ export class AlarmsController {
    */
   @Post('/:id/resolve')
   async resolveAlarm(
-    @Params('id') id: string,
-    @Body('userId') userId?: string,
-    @Body('solution') solution?: string
+    @Params(AlarmIdParamsSchema) params: AlarmIdParams,
+    @Body(ResolveAlarmBodySchema) body: ResolveAlarmBody
   ) {
+    const { id } = params;
+    const { userId, solution } = body;
     console.log(`[AlarmsController] Resolve alarm: ${id} by ${userId}`);
 
     // TODO: 更新告警状态为已解决
@@ -170,10 +154,8 @@ export class AlarmsController {
    * GET /api/alarms/stats
    */
   @Get('/stats')
-  async getAlarmStats(
-    @Query('startTime') startTime?: string,
-    @Query('endTime') endTime?: string
-  ) {
+  async getAlarmStats(@Query(AlarmStatsQuerySchema) query: AlarmStatsQuery) {
+    const { startTime, endTime } = query;
     console.log('[AlarmsController] Get alarm stats:', { startTime, endTime });
 
     // TODO: 统计告警数据

@@ -19,14 +19,18 @@ import {
   type NotificationChannel,
   createWechatLog,
   createSmsLog,
-  createMailLog,
-  markNotificationSent,
-  markNotificationFailed,
-  type WechatParams,
-  type SmsParams,
-  type MailParams,
+  createEmailLog,
+  markLogSuccess,
+  markLogError,
 } from '../entities/mongodb';
 import type { QueueService } from './queue/queue.interface';
+import { wechatService, type WechatTemplateParams } from './notification/wechat.service';
+import { smsService, type SmsParams } from './notification/sms.service';
+import { emailService, type EmailParams } from './notification/email.service';
+
+// Type aliases for consistency
+type WechatParams = WechatTemplateParams;
+type MailParams = EmailParams;
 
 /**
  * 用户通知偏好
@@ -320,22 +324,27 @@ export class AlarmNotificationService {
     const logId = result.insertedId;
 
     try {
-      // TODO: 调用微信 API
-      // const response = await this.wechatService.sendTemplateMessage(openIds[0], params);
+      // 调用微信 API
+      const response = await wechatService.sendTemplateMessage({
+        touser: openIds[0]!,
+        template_id: params.template_id,
+        url: params.url,
+        miniprogram: params.miniprogram,
+        data: params.data,
+      });
 
-      // 模拟成功响应
-      const mockResponse = {
-        Message: 'OK',
-        RequestId: `mock-${Date.now()}`,
-        BizId: `biz-${Date.now()}`,
+      const responseData = {
+        Message: response.errmsg,
+        RequestId: `wechat-${response.msgid || Date.now()}`,
+        BizId: `${response.msgid || Date.now()}`,
       };
 
-      console.log('[AlarmNotification] WeChat message sent:', mockResponse);
+      console.log('[AlarmNotification] WeChat message sent:', responseData);
 
       // 标记为成功
       await this.collections.notificationLogs.updateOne(
         { _id: logId },
-        { $set: markNotificationSent(mockResponse) }
+        { $set: markLogSuccess(responseData) }
       );
 
       return logId;
@@ -394,22 +403,21 @@ export class AlarmNotificationService {
     const logId = result.insertedId;
 
     try {
-      // TODO: 调用阿里云短信 API
-      // const response = await this.smsService.send(phones, params);
+      // 调用阿里云短信 API
+      const response = await smsService.sendSms(phones, params);
 
-      // 模拟成功响应
-      const mockResponse = {
-        Message: 'OK',
-        RequestId: `mock-${Date.now()}`,
-        BizId: `biz-${Date.now()}`,
+      const responseData = {
+        Message: response.Message || 'OK',
+        RequestId: response.RequestId,
+        BizId: response.BizId || `sms-${Date.now()}`,
       };
 
-      console.log('[AlarmNotification] SMS sent:', mockResponse);
+      console.log('[AlarmNotification] SMS sent:', responseData);
 
       // 标记为成功
       await this.collections.notificationLogs.updateOne(
         { _id: logId },
-        { $set: markNotificationSent(mockResponse) }
+        { $set: markLogSuccess(responseData) }
       );
 
       return logId;
@@ -452,26 +460,20 @@ export class AlarmNotificationService {
 
     // 创建通知日志
     const alarmId = alarm._id ? alarm._id.toString() : undefined;
-    const log = createMailLog(userId, emails, params, alarmId);
+    const log = createEmailLog(userId, emails, params, alarmId);
     const result = await this.collections.notificationLogs.insertOne(log);
     const logId = result.insertedId;
 
     try {
-      // TODO: 调用邮件服务
-      // const response = await this.emailService.send(params);
+      // 调用邮件服务
+      const response = await emailService.sendMail(params);
 
-      // 模拟成功响应
-      const mockResponse = {
-        Message: 'OK',
-        RequestId: `mock-${Date.now()}`,
-      };
-
-      console.log('[AlarmNotification] Email sent:', mockResponse);
+      console.log('[AlarmNotification] Email sent:', response);
 
       // 标记为成功
       await this.collections.notificationLogs.updateOne(
         { _id: logId },
-        { $set: markNotificationSent(mockResponse) }
+        { $set: markLogSuccess(mockResponse) }
       );
 
       return logId;
@@ -488,13 +490,12 @@ export class AlarmNotificationService {
   private async markNotificationFailed(
     logId: ObjectId,
     error: any,
-    willRetry: boolean
+    _willRetry: boolean // 参数保留以兼容现有调用，重试由队列处理
   ): Promise<void> {
-    const nextRetryAt = willRetry ? new Date(Date.now() + 60000) : undefined; // 1 分钟后重试
-
+    const log = { userId: new ObjectId(), alarmId: undefined, recipient: '', params: {}, success: false, type: 'wechat' as const, createdAt: new Date() };
     await this.collections.notificationLogs.updateOne(
       { _id: logId },
-      { $set: markNotificationFailed(error, willRetry, nextRetryAt) }
+      { $set: markLogError(log, error) }
     );
   }
 

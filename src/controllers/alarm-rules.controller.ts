@@ -13,69 +13,36 @@
 import { Controller, Get, Post, Put, Delete } from '../decorators/controller';
 import { Params, Body, Query } from '../decorators/params';
 import { AlarmRuleEngineService } from '../services/alarm-rule-engine.service';
-import type { AlarmRuleType, AlarmLevel } from '../services/alarm-rule-engine.service';
-import type { AlarmRuleDocument, ThresholdCondition, ConstantCondition } from '../entities/mongodb';
+import type { AlarmRuleDocument } from '../entities/mongodb';
 import { ObjectId } from 'mongodb';
 import { mongodb } from '../database/mongodb';
+import {
+  CreateRuleRequestSchema,
+  UpdateRuleRequestSchema,
+  ListRulesQuerySchema,
+  BatchOperationRequestSchema,
+  type CreateRuleRequest,
+  type UpdateRuleRequest,
+  type ListRulesQuery,
+  type BatchOperationRequest,
+} from '../schemas/alarm-rules.schema';
 
 /**
- * 创建规则请求体
+ * 规则查询过滤器
+ *
+ * 用于内部查询,从 ListRulesQuery 转换而来
  */
-export interface CreateRuleRequest {
-  /** 规则名称 */
-  name: string;
-  /** 规则描述 */
-  description?: string;
+interface RuleFilter {
   /** 规则类型 */
-  type: AlarmRuleType;
+  type?: string;
   /** 告警级别 */
-  level: AlarmLevel;
-  /** 目标协议 */
-  protocol?: string;
-  /** 设备 PID (可选) */
-  pid?: string | number;
-  /** 参数名称 */
-  paramName?: string;
-  /** 阈值条件 */
-  threshold?: ThresholdCondition;
-  /** 常量条件 */
-  constant?: ConstantCondition;
-  /** 自定义脚本 */
-  customScript?: string;
-  /** 去重时间窗口 (秒) */
-  deduplicationWindow?: number;
-  /** 创建人 */
-  createdBy: string;
-}
-
-/**
- * 更新规则请求体
- */
-export interface UpdateRuleRequest {
-  /** 规则名称 */
-  name?: string;
-  /** 规则描述 */
-  description?: string;
-  /** 告警级别 */
-  level?: AlarmLevel;
-  /** 目标协议 */
-  protocol?: string;
-  /** 设备 PID */
-  pid?: string | number;
-  /** 参数名称 */
-  paramName?: string;
-  /** 阈值条件 */
-  threshold?: ThresholdCondition;
-  /** 常量条件 */
-  constant?: ConstantCondition;
-  /** 自定义脚本 */
-  customScript?: string;
-  /** 去重时间窗口 (秒) */
-  deduplicationWindow?: number;
+  level?: string;
   /** 是否启用 */
   enabled?: boolean;
-  /** 更新人 */
-  updatedBy?: string;
+  /** 目标协议 */
+  protocol?: string;
+  /** 规则 ID */
+  _id?: ObjectId;
 }
 
 /**
@@ -96,33 +63,27 @@ export class AlarmRulesController {
    * GET /api/alarm-rules?type={type}&level={level}&enabled={enabled}&protocol={protocol}
    */
   @Get('/')
-  async listRules(
-    @Query('type') type?: string,
-    @Query('level') level?: string,
-    @Query('enabled') enabled?: string,
-    @Query('protocol') protocol?: string,
-    @Query('limit') limit: string = '50',
-    @Query('page') page: string = '1'
-  ) {
+  async listRules(@Query(ListRulesQuerySchema) query: ListRulesQuery) {
+    // Zod 已验证并转换类型,直接使用
+    const { type, level, enabled, protocol, limit, page } = query;
+
     console.log('[AlarmRulesController] List rules:', { type, level, enabled, protocol });
 
     try {
       // 构建查询过滤器
-      const filter: any = {};
+      const filter: RuleFilter = {};
 
       if (type) filter.type = type;
       if (level) filter.level = level;
-      if (enabled !== undefined) filter.enabled = enabled === 'true';
+      if (enabled !== undefined) filter.enabled = enabled;
       if (protocol) filter.protocol = protocol;
 
-      // 查询规则列表
-      const allRules = await this.alarmEngine.getRules(filter);
+      // 查询规则列表 (RuleFilter 兼容 Partial<AlarmRuleDocument>)
+      const allRules = await this.alarmEngine.getRules(filter as Partial<AlarmRuleDocument>);
 
-      // 分页
-      const pageNum = parseInt(page);
-      const limitNum = parseInt(limit);
-      const startIndex = (pageNum - 1) * limitNum;
-      const endIndex = startIndex + limitNum;
+      // 分页 (limit 和 page 已经被 Zod 转换为 number)
+      const startIndex = (page - 1) * limit;
+      const endIndex = startIndex + limit;
 
       const rules = allRules.slice(startIndex, endIndex);
 
@@ -131,8 +92,8 @@ export class AlarmRulesController {
         data: {
           rules,
           total: allRules.length,
-          page: pageNum,
-          limit: limitNum,
+          page,
+          limit,
           hasMore: endIndex < allRules.length,
         },
       };
@@ -198,60 +159,13 @@ export class AlarmRulesController {
    * Body: CreateRuleRequest
    */
   @Post('/')
-  async createRule(@Body('data') data: CreateRuleRequest) {
+  async createRule(@Body(CreateRuleRequestSchema) body: CreateRuleRequest) {
+    // Zod 已验证所有字段 (包括必填字段和类型特定条件),直接使用
+    const { data } = body;
+
     console.log('[AlarmRulesController] Create rule:', data);
 
     try {
-      // 验证必填字段
-      if (!data.name) {
-        return {
-          status: 'error',
-          message: 'Rule name is required',
-          data: null,
-        };
-      }
-
-      if (!data.type) {
-        return {
-          status: 'error',
-          message: 'Rule type is required',
-          data: null,
-        };
-      }
-
-      if (!data.level) {
-        return {
-          status: 'error',
-          message: 'Alarm level is required',
-          data: null,
-        };
-      }
-
-      if (!data.createdBy) {
-        return {
-          status: 'error',
-          message: 'Creator user ID is required',
-          data: null,
-        };
-      }
-
-      // 根据规则类型验证条件
-      if (data.type === 'threshold' && !data.threshold) {
-        return {
-          status: 'error',
-          message: 'Threshold condition is required for threshold rule',
-          data: null,
-        };
-      }
-
-      if (data.type === 'constant' && !data.constant) {
-        return {
-          status: 'error',
-          message: 'Constant condition is required for constant rule',
-          data: null,
-        };
-      }
-
       // 构建规则文档
       const now = new Date();
       const rule: Omit<AlarmRuleDocument, '_id'> = {
@@ -302,7 +216,10 @@ export class AlarmRulesController {
    * Body: UpdateRuleRequest
    */
   @Put('/:id')
-  async updateRule(@Params('id') id: string, @Body('data') data: UpdateRuleRequest) {
+  async updateRule(@Params('id') id: string, @Body(UpdateRuleRequestSchema) body: UpdateRuleRequest) {
+    // Zod 已验证请求体,直接使用
+    const { data } = body;
+
     console.log(`[AlarmRulesController] Update rule: ${id}`, data);
 
     try {
@@ -523,18 +440,13 @@ export class AlarmRulesController {
    * Body: { ids: string[], userId?: string }
    */
   @Post('/batch/enable')
-  async batchEnableRules(@Body('ids') ids: string[], @Body('userId') userId: string = 'system') {
+  async batchEnableRules(@Body(BatchOperationRequestSchema) body: BatchOperationRequest) {
+    // Zod 已验证 ids 非空,直接使用
+    const { ids, userId } = body;
+
     console.log('[AlarmRulesController] Batch enable rules:', ids);
 
     try {
-      if (!ids || ids.length === 0) {
-        return {
-          status: 'error',
-          message: 'No rule IDs provided',
-          data: null,
-        };
-      }
-
       const results = [];
       for (const id of ids) {
         try {
@@ -584,18 +496,13 @@ export class AlarmRulesController {
    * Body: { ids: string[], userId?: string }
    */
   @Post('/batch/disable')
-  async batchDisableRules(@Body('ids') ids: string[], @Body('userId') userId: string = 'system') {
+  async batchDisableRules(@Body(BatchOperationRequestSchema) body: BatchOperationRequest) {
+    // Zod 已验证 ids 非空,直接使用
+    const { ids, userId } = body;
+
     console.log('[AlarmRulesController] Batch disable rules:', ids);
 
     try {
-      if (!ids || ids.length === 0) {
-        return {
-          status: 'error',
-          message: 'No rule IDs provided',
-          data: null,
-        };
-      }
-
       const results = [];
       for (const id of ids) {
         try {

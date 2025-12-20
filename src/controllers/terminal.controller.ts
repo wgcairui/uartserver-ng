@@ -6,7 +6,12 @@
 import { Controller, Post, Get, Delete } from '../decorators/controller';
 import { Body, Params } from '../decorators/params';
 import type { QueryResult, QueryDataResponse } from '../schemas/query-data.schema';
-import { QueryResultSchema } from '../schemas/query-data.schema';
+import {
+  QueryDataRequestSchema,
+  type QueryDataRequest,
+  ClearTerminalCacheParamsSchema,
+  type ClearTerminalCacheParams,
+} from '../schemas/terminal.schema';
 import { terminalCache } from '../repositories/terminal-cache';
 
 /**
@@ -28,26 +33,17 @@ export class TerminalController {
    * - HTTP 响应: 150ms → <5ms (30x 提升)
    * - 吞吐量: 500 req/s → 10,000+ req/s (20x 提升)
    *
-   * @param data - 设备查询结果数据
+   * @param body - 请求体（已通过 Zod 验证）
    * @returns 立即返回状态
    */
   @Post('/queryData')
-  async queryData(@Body('data') data: QueryResult): Promise<QueryDataResponse> {
+  async queryData(@Body(QueryDataRequestSchema) body: QueryDataRequest): Promise<QueryDataResponse> {
     try {
-      // 1. 快速数据验证 (<1ms)
-      const result = QueryResultSchema.safeParse(data);
-      if (!result.success) {
-        console.error('数据验证失败:', result.error.issues);
-        return {
-          status: 'error',
-          message: `数据验证失败: ${result.error.issues[0]?.message || '未知错误'}`,
-        };
-      }
-
-      const validData = result.data;
+      // 1. 数据已通过装饰器验证，直接使用 ✅
+      const { data } = body;
 
       // 2. 检查是否正在处理中（防止重复）
-      const key = `${validData.mac}:${validData.pid}`;
+      const key = `${data.mac}:${data.pid}`;
       if (this.parseSet.has(key)) {
         return { status: 'skip', message: '数据正在处理中' };
       }
@@ -56,7 +52,7 @@ export class TerminalController {
       this.parseSet.add(key);
 
       // 4. 异步处理（不等待）⭐ 核心优化点
-      this.processAsync(validData, key).catch((error) => {
+      this.processAsync(data, key).catch((error) => {
         console.error(`异步处理失败 [${key}]:`, error);
       });
 
@@ -157,10 +153,11 @@ export class TerminalController {
   /**
    * 清除特定终端的缓存
    *
-   * @param mac - 终端 MAC 地址
+   * @param params - 路径参数（已通过 Zod 验证）
    */
   @Delete('/cache/:mac')
-  async clearTerminalCache(@Params('mac') mac: string) {
+  async clearTerminalCache(@Params(ClearTerminalCacheParamsSchema) params: ClearTerminalCacheParams) {
+    const { mac } = params;
     terminalCache.invalidate(mac);
     return {
       status: 'ok',

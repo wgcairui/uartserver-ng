@@ -8,16 +8,37 @@
 
 import { Controller, Get, Post } from '../decorators/controller';
 import { Body, Query, Params, User } from '../decorators/params';
+import { Validate, type Validated } from '../decorators/validate';
 import { terminalOperationService } from '../domain/terminal-operation.service';
 import { terminalRepository } from '../repositories/terminal.repository';
 import { dtuOperationLogService } from '../services/dtu-operation-log.service';
 import type { DtuOperationType } from '../types/socket-events';
 import { logger } from '../utils/logger';
+import {
+  RestartDtuRequestSchema,
+  type RestartDtuRequest,
+  Restart485RequestSchema,
+  type Restart485Request,
+  UpdateMountRequestSchema,
+  type UpdateMountRequest,
+  OperateInstructRequestSchema,
+  type OperateInstructRequest,
+  SetTerminalRequestSchema,
+  type SetTerminalRequest,
+  GetTerminalRequestSchema,
+  type GetTerminalRequest,
+  GetDtuLogsQuerySchema,
+  type GetDtuLogsQuery,
+  GetDtuStatsQuerySchema,
+  type GetDtuStatsQuery,
+  GetRecentOperationsParamsSchema,
+  type GetRecentOperationsParams,
+} from '../schemas/dtu.schema';
 
 /**
  * API 响应基础接口
  */
-interface ApiResponse<T = any> {
+interface ApiResponse<T = unknown> {
   success: boolean;
   message?: string;
   data?: T;
@@ -89,17 +110,13 @@ export class DtuController {
    * POST /api/dtu/restart
    */
   @Post('/restart')
+  @Validate(RestartDtuRequestSchema)
   async restartDtu(
-    @Body('mac') mac: string,
+    @Body() body: Validated<RestartDtuRequest>,
     @User('userId') userId?: string
   ): Promise<ApiResponse> {
     try {
-      if (!mac || typeof mac !== 'string') {
-        return {
-          success: false,
-          message: 'Invalid MAC address',
-        };
-      }
+      const { mac } = body;
 
       // 检查速率限制
       const rateLimit = this.checkRateLimit(mac, 'restart');
@@ -142,17 +159,13 @@ export class DtuController {
    * POST /api/dtu/restart485
    */
   @Post('/restart485')
+  @Validate(Restart485RequestSchema)
   async restart485(
-    @Body('mac') mac: string,
+    @Body() body: Validated<Restart485Request>,
     @User('userId') userId?: string
   ): Promise<ApiResponse> {
     try {
-      if (!mac || typeof mac !== 'string') {
-        return {
-          success: false,
-          message: 'Invalid MAC address',
-        };
-      }
+      const { mac } = body;
 
       // 检查速率限制
       const rateLimit = this.checkRateLimit(mac, 'restart485');
@@ -195,25 +208,13 @@ export class DtuController {
    * POST /api/dtu/updateMount
    */
   @Post('/updateMount')
+  @Validate(UpdateMountRequestSchema)
   async updateMount(
-    @Body('mac') mac: string,
-    @Body('content') content: any,
+    @Body() body: Validated<UpdateMountRequest>,
     @User('userId') userId?: string
   ): Promise<ApiResponse> {
     try {
-      if (!mac || typeof mac !== 'string') {
-        return {
-          success: false,
-          message: 'Invalid MAC address',
-        };
-      }
-
-      if (!content) {
-        return {
-          success: false,
-          message: 'Mount configuration is required',
-        };
-      }
+      const { mac, content } = body;
 
       // 检查速率限制
       const rateLimit = this.checkRateLimit(mac, 'updateMount');
@@ -256,25 +257,13 @@ export class DtuController {
    * POST /api/dtu/operate
    */
   @Post('/operate')
+  @Validate(OperateInstructRequestSchema)
   async operateInstruct(
-    @Body('mac') mac: string,
-    @Body('content') content: any,
+    @Body() body: Validated<OperateInstructRequest>,
     @User('userId') userId?: string
   ): Promise<ApiResponse> {
     try {
-      if (!mac || typeof mac !== 'string') {
-        return {
-          success: false,
-          message: 'Invalid MAC address',
-        };
-      }
-
-      if (!content) {
-        return {
-          success: false,
-          message: 'Instruction content is required',
-        };
-      }
+      const { mac, content } = body;
 
       // 检查速率限制
       const rateLimit = this.checkRateLimit(mac, 'OprateInstruct');
@@ -317,25 +306,13 @@ export class DtuController {
    * POST /api/dtu/setTerminal
    */
   @Post('/setTerminal')
+  @Validate(SetTerminalRequestSchema)
   async setTerminal(
-    @Body('mac') mac: string,
-    @Body('content') content: any,
+    @Body() body: Validated<SetTerminalRequest>,
     @User('userId') userId?: string
   ): Promise<ApiResponse> {
     try {
-      if (!mac || typeof mac !== 'string') {
-        return {
-          success: false,
-          message: 'Invalid MAC address',
-        };
-      }
-
-      if (!content) {
-        return {
-          success: false,
-          message: 'Terminal parameters are required',
-        };
-      }
+      const { mac, content } = body;
 
       // 检查速率限制
       const rateLimit = this.checkRateLimit(mac, 'setTerminal');
@@ -378,17 +355,13 @@ export class DtuController {
    * POST /api/dtu/getTerminal
    */
   @Post('/getTerminal')
+  @Validate(GetTerminalRequestSchema)
   async getTerminal(
-    @Body('mac') mac: string,
+    @Body() body: Validated<GetTerminalRequest>,
     @User('userId') userId?: string
   ): Promise<ApiResponse> {
     try {
-      if (!mac || typeof mac !== 'string') {
-        return {
-          success: false,
-          message: 'Invalid MAC address',
-        };
-      }
+      const { mac } = body;
 
       // 检查速率限制
       const rateLimit = this.checkRateLimit(mac, 'getTerminal');
@@ -431,30 +404,20 @@ export class DtuController {
    * GET /api/dtu/logs
    */
   @Get('/logs')
-  async getDtuLogs(
-    @Query('mac') mac?: string,
-    @Query('operation') operation?: string,
-    @Query('operatedBy') operatedBy?: string,
-    @Query('successOnly') successOnly?: string,
-    @Query('startTime') startTime?: string,
-    @Query('endTime') endTime?: string,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-    @Query('sortBy') sortBy?: string,
-    @Query('sortOrder') sortOrder?: string
-  ): Promise<ApiResponse> {
+  @Validate(GetDtuLogsQuerySchema, 'query')
+  async getDtuLogs(@Query() query: Validated<GetDtuLogsQuery>): Promise<ApiResponse> {
     try {
       const result = await dtuOperationLogService.queryLogs({
-        mac,
-        operation: operation as DtuOperationType | undefined,
-        operatedBy,
-        successOnly: successOnly === 'true' ? true : successOnly === 'false' ? false : undefined,
-        startTime: startTime ? new Date(startTime) : undefined,
-        endTime: endTime ? new Date(endTime) : undefined,
-        page: page ? parseInt(page, 10) : 1,
-        limit: limit ? parseInt(limit, 10) : 50,
-        sortBy: (sortBy as 'operatedAt' | 'useTime') || 'operatedAt',
-        sortOrder: (sortOrder as 'asc' | 'desc') || 'desc',
+        mac: query.mac,
+        operation: query.operation,
+        operatedBy: query.operatedBy,
+        successOnly: query.successOnly,
+        startTime: query.startTime,
+        endTime: query.endTime,
+        page: query.page,
+        limit: query.limit,
+        sortBy: query.sortBy,
+        sortOrder: query.sortOrder,
       });
 
       return {
@@ -475,16 +438,13 @@ export class DtuController {
    * GET /api/dtu/stats
    */
   @Get('/stats')
-  async getDtuStats(
-    @Query('mac') mac?: string,
-    @Query('startTime') startTime?: string,
-    @Query('endTime') endTime?: string
-  ): Promise<ApiResponse> {
+  @Validate(GetDtuStatsQuerySchema, 'query')
+  async getDtuStats(@Query() query: Validated<GetDtuStatsQuery>): Promise<ApiResponse> {
     try {
       const stats = await dtuOperationLogService.getOperationStats(
-        mac,
-        startTime ? new Date(startTime) : undefined,
-        endTime ? new Date(endTime) : undefined
+        query.mac,
+        query.startTime,
+        query.endTime
       );
 
       return {
@@ -505,22 +465,16 @@ export class DtuController {
    * GET /api/dtu/:mac/recent
    */
   @Get('/:mac/recent')
+  @Validate(GetRecentOperationsParamsSchema, 'params')
   async getRecentOperations(
-    @Params('mac') mac: string,
-    @Query('limit') limit?: string
+    @Params() params: Validated<GetRecentOperationsParams>,
+    @Query('limit') limitStr?: string
   ): Promise<ApiResponse> {
     try {
-      if (!mac || typeof mac !== 'string') {
-        return {
-          success: false,
-          message: 'Invalid MAC address',
-        };
-      }
+      const { mac } = params;
+      const limit = limitStr ? parseInt(limitStr, 10) : 10;
 
-      const logs = await dtuOperationLogService.getRecentOperations(
-        mac,
-        limit ? parseInt(limit, 10) : 10
-      );
+      const logs = await dtuOperationLogService.getRecentOperations(mac, limit);
 
       return {
         success: true,

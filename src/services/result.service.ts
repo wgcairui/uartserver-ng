@@ -100,62 +100,31 @@ class ResultService {
       hasAlarm,
     };
 
-    // 检测是否应该使用事务
-    // 在测试环境中跳过事务（单实例 MongoDB 不支持事务）
-    const useTransactions = process.env.NODE_ENV !== 'test';
+    // 禁用 MongoDB 事务
+    // 原因：开发环境使用单实例 MongoDB，不支持事务
+    // 未来：如果生产环境配置了副本集，可以通过环境变量启用
+    // 示例：const useTransactions = process.env.MONGODB_REPLICA_SET === 'true';
 
-    if (useTransactions) {
-      // 使用事务确保两个集合操作的原子性
-      const session = mongodb.getClient().startSession();
+    try {
+      // 1. 存储到历史集合 (client.resultcolltions)
+      await mongodb
+        .getCollection<TerminalClientResult>('client.resultcolltions')
+        .insertOne(historicalResult as TerminalClientResult);
 
-      try {
-        await session.withTransaction(async () => {
-          // 1. 存储到历史集合 (client.resultcolltions)
-          await mongodb
-            .getCollection<TerminalClientResult>('client.resultcolltions')
-            .insertOne(historicalResult as TerminalClientResult, { session });
+      // 2. 更新单例集合 (client.resultsingles) - upsert
+      await mongodb
+        .getCollection<TerminalClientResultSingle>('client.resultsingles')
+        .updateOne({ mac, pid }, { $set: singleResult }, { upsert: true });
 
-          // 2. 更新单例集合 (client.resultsingles) - upsert
-          await mongodb
-            .getCollection<TerminalClientResultSingle>('client.resultsingles')
-            .updateOne({ mac, pid }, { $set: singleResult }, { upsert: true, session });
-        });
+      logger.debug(`Result saved: ${mac}/${pid}, ${result.length} items, hasAlarm=${hasAlarm}`);
 
-        logger.debug(`Result saved: ${mac}/${pid}, ${result.length} items, hasAlarm=${hasAlarm}`);
-
-        // 推送实时数据给订阅用户（异步，不等待）
-        this.pushRealTimeUpdate(mac, pid, singleResult, hasAlarm).catch((error) => {
-          logger.error(`Failed to push real-time update for ${mac}/${pid}:`, error);
-        });
-      } catch (error) {
-        logger.error(`Failed to save query result for ${mac}/${pid}:`, error);
-        throw error;
-      } finally {
-        await session.endSession();
-      }
-    } else {
-      // 测试环境：不使用事务，直接执行操作
-      try {
-        // 1. 存储到历史集合 (client.resultcolltions)
-        await mongodb
-          .getCollection<TerminalClientResult>('client.resultcolltions')
-          .insertOne(historicalResult as TerminalClientResult);
-
-        // 2. 更新单例集合 (client.resultsingles) - upsert
-        await mongodb
-          .getCollection<TerminalClientResultSingle>('client.resultsingles')
-          .updateOne({ mac, pid }, { $set: singleResult }, { upsert: true });
-
-        logger.debug(`Result saved (no transaction): ${mac}/${pid}, ${result.length} items, hasAlarm=${hasAlarm}`);
-
-        // 推送实时数据给订阅用户（异步，不等待）
-        this.pushRealTimeUpdate(mac, pid, singleResult, hasAlarm).catch((error) => {
-          logger.error(`Failed to push real-time update for ${mac}/${pid}:`, error);
-        });
-      } catch (error) {
-        logger.error(`Failed to save query result for ${mac}/${pid}:`, error);
-        throw error;
-      }
+      // 推送实时数据给订阅用户（异步，不等待）
+      this.pushRealTimeUpdate(mac, pid, singleResult, hasAlarm).catch((error) => {
+        logger.error(`Failed to push real-time update for ${mac}/${pid}:`, error);
+      });
+    } catch (error) {
+      logger.error(`Failed to save query result for ${mac}/${pid}:`, error);
+      throw error;
     }
   }
 
@@ -340,6 +309,95 @@ class ResultService {
       logger.error('Failed to delete expired results:', error);
       return 0;
     }
+  }
+
+  /**
+   * 数据库写入健康检查
+   * 执行一次完整的写入-读取-删除操作来验证数据库功能
+   * @returns 健康检查结果
+   */
+  async healthCheck(): Promise<{
+    healthy: boolean;
+    latency: number;
+    details: {
+      canWrite: boolean;
+      canRead: boolean;
+      canDelete: boolean;
+      error?: string;
+    };
+  }> {
+    const startTime = Date.now();
+    const testMac = '__health_check__';
+    const testPid = 999;
+    const testTimestamp = Date.now();
+
+    const result = {
+      healthy: false,
+      latency: 0,
+      details: {
+        canWrite: false,
+        canRead: false,
+        canDelete: false,
+        error: undefined as string | undefined,
+      },
+    };
+
+    try {
+      // 1. 测试写入
+      await mongodb.getCollection<TerminalClientResult>('client.resultcolltions').insertOne({
+        mac: testMac,
+        pid: testPid,
+        result: [{ name: 'test', value: 'health_check', parseValue: 'health_check' }],
+        timeStamp: testTimestamp,
+        useTime: 0,
+        parentId: '',
+        hasAlarm: 0,
+      } as TerminalClientResult);
+      result.details.canWrite = true;
+
+      // 2. 测试读取
+      const doc = await mongodb
+        .getCollection<TerminalClientResult>('client.resultcolltions')
+        .findOne({ mac: testMac, pid: testPid });
+
+      if (doc && doc.mac === testMac) {
+        result.details.canRead = true;
+      }
+
+      // 3. 测试删除
+      const deleteResult = await mongodb
+        .getCollection<TerminalClientResult>('client.resultcolltions')
+        .deleteOne({ mac: testMac, pid: testPid });
+
+      if (deleteResult.deletedCount === 1) {
+        result.details.canDelete = true;
+      }
+
+      // 全部成功才算健康
+      result.healthy = result.details.canWrite && result.details.canRead && result.details.canDelete;
+      result.latency = Date.now() - startTime;
+
+      if (result.healthy) {
+        logger.debug(`Database health check passed (${result.latency}ms)`);
+      } else {
+        logger.warn(`Database health check failed: ${JSON.stringify(result.details)}`);
+      }
+    } catch (error) {
+      result.details.error = String(error);
+      result.latency = Date.now() - startTime;
+      logger.error('Database health check error:', error);
+
+      // 清理可能残留的测试数据
+      try {
+        await mongodb
+          .getCollection<TerminalClientResult>('client.resultcolltions')
+          .deleteOne({ mac: testMac, pid: testPid });
+      } catch (cleanupError) {
+        logger.warn('Failed to cleanup health check data:', cleanupError);
+      }
+    }
+
+    return result;
   }
 }
 

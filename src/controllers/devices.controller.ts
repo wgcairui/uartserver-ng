@@ -10,6 +10,14 @@
 
 import { Controller, Get, Post } from '../decorators/controller';
 import { Params, Query } from '../decorators/params';
+import {
+  ListDevicesQuerySchema,
+  type ListDevicesQuery,
+  DeviceMacParamsSchema,
+  type DeviceMacParams,
+  GetDeviceDataQuerySchema,
+  type GetDeviceDataQuery,
+} from '../schemas/devices.schema';
 
 /**
  * 设备信息
@@ -58,12 +66,8 @@ export class DevicesController {
    * GET /api/devices?mac={mac}&online={online}&limit={limit}&page={page}
    */
   @Get('/')
-  async listDevices(
-    @Query('mac') mac?: string,
-    @Query('online') online?: string,
-    @Query('limit') limit: string = '20',
-    @Query('page') page: string = '1'
-  ) {
+  async listDevices(@Query(ListDevicesQuerySchema) query: ListDevicesQuery) {
+    const { mac, online, limit, page } = query;
     console.log(`[DevicesController] List devices: mac=${mac}, online=${online}`);
 
     // TODO: 从数据库查询设备列表
@@ -85,8 +89,8 @@ export class DevicesController {
       data: {
         devices,
         total: devices.length,
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page,
+        limit,
       },
     };
   }
@@ -97,7 +101,8 @@ export class DevicesController {
    * GET /api/devices/:mac
    */
   @Get('/:mac')
-  async getDevice(@Params('mac') mac: string) {
+  async getDevice(@Params(DeviceMacParamsSchema) params: DeviceMacParams) {
+    const { mac } = params;
     console.log(`[DevicesController] Get device: ${mac}`);
 
     // TODO: 从数据库查询设备详情
@@ -124,11 +129,11 @@ export class DevicesController {
    */
   @Get('/:mac/data')
   async getDeviceData(
-    @Params('mac') mac: string,
-    @Query('startTime') startTime?: string,
-    @Query('endTime') endTime?: string,
-    @Query('limit') limit: string = '100'
+    @Params(DeviceMacParamsSchema) params: DeviceMacParams,
+    @Query(GetDeviceDataQuerySchema) query: GetDeviceDataQuery
   ) {
+    const { mac } = params;
+    const { startTime, endTime, limit } = query;
     console.log(`[DevicesController] Get device data: ${mac}`, {
       startTime,
       endTime,
@@ -153,7 +158,8 @@ export class DevicesController {
    * GET /api/devices/:mac/data/latest
    */
   @Get('/:mac/data/latest')
-  async getLatestData(@Params('mac') mac: string) {
+  async getLatestData(@Params(DeviceMacParamsSchema) params: DeviceMacParams) {
+    const { mac } = params;
     console.log(`[DevicesController] Get latest data: ${mac}`);
 
     // TODO: 从缓存或数据库查询最新数据
@@ -174,7 +180,8 @@ export class DevicesController {
    * POST /api/devices/:mac/query
    */
   @Post('/:mac/query')
-  async queryDevice(@Params('mac') mac: string) {
+  async queryDevice(@Params(DeviceMacParamsSchema) params: DeviceMacParams) {
+    const { mac } = params;
     console.log(`[DevicesController] Manual query: ${mac}`);
 
     // TODO: 触发手动查询

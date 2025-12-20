@@ -1299,7 +1299,9 @@ private async sendQueryInstruct(query: MountDevQueryCache): Promise<void> {
     // 检查查询间隔
     if (currentDev.lastEmit) {
       const elapsed = Date.now() - currentDev.lastEmit.getTime();
-      if (elapsed < query.Interval - 1000) {
+      // 修复：去掉 -1000 容差，精确匹配配置间隔
+      // 原来的 Interval - 1000 会导致提前 1 秒触发，查询频率再增加约 10%
+      if (elapsed < query.Interval) {
         return;
       }
 
@@ -1760,8 +1762,9 @@ async OprateDTU(
  * @returns 查询间隔 (ms)
  */
 private async calculateQueryInterval(terminal: Terminal): Promise<number> {
-  // 基础间隔：如果有 ICCID 使用 1000ms（4G），否则 500ms
-  let base = terminal.ICCID ? 1000 : 500;
+  // 基础间隔：如果有 ICCID 使用 2000ms（4G），否则 1000ms
+  // 修复：与老系统保持一致，原来的 1000:500 会导致查询频率翻倍
+  let base = terminal.ICCID ? 2000 : 1000;
 
   // 如果是阿里云 IoT 卡且流量资源小于 512MB，增加间隔以节省流量
   if (terminal.iccidInfo) {
@@ -1778,17 +1781,20 @@ private async calculateQueryInterval(terminal: Terminal): Promise<number> {
     return Math.max(base, 5000);
   }
 
-  // 使用第一个设备的协议计算指令数量
-  const firstDev = mountDevs[0];
-  if (!firstDev) {
-    return Math.max(base, 5000);
-  }
+  // 修复：统计所有挂载设备的指令数量之和（而非仅第一个设备）
+  // 原来只计算第一个设备会导致多设备终端查询频率暴增 3-6 倍
+  const instructCounts = await Promise.all(
+    mountDevs.map(async (dev) => {
+      const protocol = await this.cacheProtocol(dev.protocol);
+      return protocol?.instruct?.length || 1;
+    })
+  );
 
-  const protocol = await this.cacheProtocol(firstDev.protocol);
-  const instructCount = protocol?.instruct?.length || 1;
+  // 所有设备的指令总数
+  const totalInstructs = instructCounts.reduce((sum, count) => sum + count, 0);
 
-  // 查询间隔 = 指令数量 * 基础间隔，最小 5 秒
-  return Math.max(instructCount * base, 5000);
+  // 查询间隔 = 总指令数量 * 基础间隔，最小 5 秒
+  return Math.max(totalInstructs * base, 5000);
 }
 
 /**
@@ -1975,8 +1981,8 @@ async clear_Cache(): Promise<void> {
     const cacheSize = this.queryCache.size;
     logger.info(`Refreshing query cache, current size: ${cacheSize}`);
 
-    // 获取所有活跃节点
-    const nodes = await nodeService.getActiveNodes();
+    // 获取所有节点（注：NodeService 没有 getActiveNodes 方法，使用 getAllNodes）
+    const nodes = await nodeService.getAllNodes();
 
     // 并发刷新所有节点的缓存
     await Promise.all(
