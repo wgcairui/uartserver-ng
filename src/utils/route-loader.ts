@@ -6,6 +6,12 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { ROUTE_METADATA, type ControllerMetadata } from '../decorators/controller';
 import { PARAM_METADATA, type ParamMetadata } from '../decorators/params';
+import {
+  VALIDATION_METADATA,
+  validateData,
+  formatValidationError,
+  type ValidateTarget,
+} from '../decorators/validate';
 import '../types'; // 导入 Fastify 类型扩展
 
 /**
@@ -51,6 +57,9 @@ function registerController(
   // 获取参数元数据
   const paramMetadata = PARAM_METADATA.get(ControllerClass);
 
+  // 获取验证元数据
+  const validationMetadata = VALIDATION_METADATA.get(ControllerClass);
+
   // 创建 Controller 实例
   const controllerInstance = new ControllerClass();
 
@@ -63,7 +72,8 @@ function registerController(
       route.path,
       route.handler,
       controllerInstance,
-      paramMetadata
+      paramMetadata,
+      validationMetadata
     );
   }
 }
@@ -78,7 +88,8 @@ function registerRoute(
   path: string,
   handlerName: string,
   controllerInstance: any,
-  paramMetadata?: Map<string, ParamMetadata[]>
+  paramMetadata?: Map<string, ParamMetadata[]>,
+  validationMetadata?: Map<string, any>
 ): void {
   // 组合完整路径
   const fullPath = combinePath(controllerMetadata.basePath, path);
@@ -93,21 +104,92 @@ function registerRoute(
   // 获取参数元数据
   const methodParams = paramMetadata?.get(handlerName) || [];
 
+  // 获取验证元数据
+  const validation = validationMetadata?.get(handlerName);
+
   // 创建 Fastify 路由处理器
   const fastifyHandler = async (request: FastifyRequest, reply: FastifyReply) => {
-    // 提取参数
-    const args = extractParameters(request, reply, methodParams);
+    // 1. 如果有验证配置，先进行验证
+    if (validation) {
+      const validationResult = performValidation(request, validation.config);
 
-    // 调用 Controller 方法
-    const result = await handlerMethod.apply(controllerInstance, args);
+      if (!validationResult.success) {
+        // 验证失败
+        if (validation.config.throwOnError) {
+          throw validationResult.error;
+        }
 
-    // 返回结果
-    return result;
+        // 返回错误响应
+        return {
+          status: 'error',
+          message: validationResult.message,
+          data: null,
+        };
+      }
+    }
+
+    try {
+      // 2. 提取参数（可能包含验证）
+      const args = extractParameters(request, reply, methodParams);
+
+      // 3. 调用 Controller 方法
+      const result = await handlerMethod.apply(controllerInstance, args);
+
+      // 4. 返回结果
+      return result;
+    } catch (error) {
+      // 捕获参数验证失败的错误
+      if (error instanceof Error && error.message.includes('参数验证失败')) {
+        return {
+          status: 'error',
+          message: error.message.replace('参数验证失败: ', ''),
+          data: null,
+        };
+      }
+      // 其他错误继续抛出
+      throw error;
+    }
   };
 
   // 注册路由到 Fastify
   const methodLower = method.toLowerCase() as 'get' | 'post' | 'put' | 'delete' | 'patch';
   app[methodLower](fullPath, fastifyHandler);
+}
+
+/**
+ * 执行验证
+ */
+function performValidation(
+  request: FastifyRequest,
+  config: { schema: any; target?: ValidateTarget; throwOnError?: boolean }
+): { success: true } | { success: false; message: string; error: any } {
+  // 确定验证目标数据
+  let targetData: unknown;
+  switch (config.target) {
+    case 'query':
+      targetData = request.query;
+      break;
+    case 'params':
+      targetData = request.params;
+      break;
+    case 'body':
+    default:
+      targetData = request.body;
+      break;
+  }
+
+  // 执行验证
+  const validationResult = validateData(targetData, config.schema);
+
+  if (!validationResult.success) {
+    return {
+      success: false,
+      message: formatValidationError(validationResult.error),
+      error: validationResult.error,
+    };
+  }
+
+  return { success: true };
 }
 
 /**
@@ -149,32 +231,57 @@ function extractParameters(
 }
 
 /**
- * 提取单个参数
+ * 提取单个参数（支持 Zod 验证）
  */
 function extractParameter(
   request: FastifyRequest,
   _reply: FastifyReply,
   param: ParamMetadata
 ): any {
+  let data: any;
+
+  // 1. 根据参数类型提取数据
   switch (param.type) {
     case 'body':
-      return extractBodyParameter(request, param.propertyKey);
+      data = extractBodyParameter(request, param.propertyKey);
+      break;
 
     case 'query':
-      return extractQueryParameter(request, param.propertyKey);
+      data = extractQueryParameter(request, param.propertyKey);
+      break;
 
     case 'params':
-      return extractParamsParameter(request, param.propertyKey);
+      data = extractParamsParameter(request, param.propertyKey);
+      break;
 
     case 'user':
-      return extractUserParameter(request, param.propertyKey);
+      data = extractUserParameter(request, param.propertyKey);
+      break;
 
     case 'headers':
-      return extractHeadersParameter(request, param.propertyKey);
+      data = extractHeadersParameter(request, param.propertyKey);
+      break;
 
     default:
-      return undefined;
+      data = undefined;
   }
+
+  // 2. 如果参数装饰器中提供了 schema，则验证数据
+  if (param.schema) {
+    const validationResult = validateData(data, param.schema);
+
+    if (!validationResult.success) {
+      // 验证失败，抛出格式化的错误
+      const errorMessage = formatValidationError(validationResult.error);
+      throw new Error(`参数验证失败: ${errorMessage}`);
+    }
+
+    // 返回验证后的数据
+    return validationResult.data;
+  }
+
+  // 3. 没有 schema，直接返回原始数据
+  return data;
 }
 
 /**

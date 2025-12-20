@@ -80,6 +80,7 @@ class StabilityTest {
 
   private metricsInterval!: Timer;
   private queryIntervals: Timer[] = [];
+  private heartbeatIntervals: Timer[] = [];
 
   private isRunning = false;
 
@@ -226,6 +227,30 @@ class StabilityTest {
 
     this.nodeClients.forEach((client, index) => {
       const mac = `AA:BB:CC:DD:EE:${index.toString(16).padStart(2, '0')}`;
+      const queryEventName = `queryResult_${mac}_1`;
+
+      // 使用 Map 跟踪每个查询的开始时间
+      const queryStartTimes = new Map<string, number>();
+
+      // 监听服务器响应，根据实际结果统计成功/失败
+      client.on(queryEventName, (response: any) => {
+        const key = `${response.mac}_${response.pid}`;
+        const startTime = queryStartTimes.get(key);
+
+        if (startTime) {
+          const responseTime = Date.now() - startTime;
+          this.responseTimes.push(responseTime);
+          queryStartTimes.delete(key); // 清理已处理的查询
+        }
+
+        if (response.success) {
+          this.successfulQueries++;
+        } else {
+          this.failedQueries++;
+          this.errors.push(`Query failed for ${mac}/1: ${response.error || 'Unknown error'}`);
+        }
+      });
+
       const interval = setInterval(() => {
         if (!this.isRunning) {
           clearInterval(interval);
@@ -233,7 +258,8 @@ class StabilityTest {
         }
 
         const queryStart = Date.now();
-        const queryEventName = `queryResult_${mac}_1`;
+        const key = `${mac}_1`;
+        queryStartTimes.set(key, queryStart);
 
         this.totalQueries++;
 
@@ -264,16 +290,63 @@ class StabilityTest {
           },
         });
 
-        const responseTime = Date.now() - queryStart;
-        this.responseTimes.push(responseTime);
-        this.successfulQueries++;
-
       }, CONFIG.QUERY_INTERVAL_MS);
 
       this.queryIntervals.push(interval);
     });
 
     this.log(`✅ 持续查询已启动（间隔: ${CONFIG.QUERY_INTERVAL_MS}ms）`);
+  }
+
+  /**
+   * 启动心跳发送
+   */
+  private startHeartbeats(): void {
+    this.log('💓 启动心跳发送...');
+
+    const HEARTBEAT_INTERVAL = 30000; // 30 秒发送一次心跳（服务器超时时间为 60 秒）
+
+    // Node 客户端心跳
+    this.nodeClients.forEach((client, index) => {
+      const interval = setInterval(() => {
+        if (!this.isRunning) {
+          clearInterval(interval);
+          return;
+        }
+
+        // 发送心跳
+        client.emit('heartbeat', {}, (response: any) => {
+          // 心跳响应（可选处理）
+          if (response && response.timestamp) {
+            // 心跳成功
+          }
+        });
+      }, HEARTBEAT_INTERVAL);
+
+      this.heartbeatIntervals.push(interval);
+    });
+
+    // User 客户端心跳
+    this.userClients.forEach((client, index) => {
+      const interval = setInterval(() => {
+        if (!this.isRunning) {
+          clearInterval(interval);
+          return;
+        }
+
+        // 发送用户心跳
+        client.emit('heartbeat', { timestamp: Date.now() }, (response: any) => {
+          // 心跳响应（可选处理）
+          if (response && response.serverTime) {
+            // 心跳成功
+          }
+        });
+      }, HEARTBEAT_INTERVAL);
+
+      this.heartbeatIntervals.push(interval);
+    });
+
+    this.log(`✅ 心跳发送已启动（Node: ${this.nodeClients.length}, User: ${this.userClients.length}, 间隔: ${HEARTBEAT_INTERVAL}ms）`);
   }
 
   /**
@@ -394,6 +467,7 @@ class StabilityTest {
     }
 
     this.queryIntervals.forEach(interval => clearInterval(interval));
+    this.heartbeatIntervals.forEach(interval => clearInterval(interval));
 
     // 断开所有客户端
     this.nodeClients.forEach(client => client.disconnect());
@@ -440,7 +514,10 @@ class StabilityTest {
       // 3. 启动持续查询
       this.startContinuousQueries();
 
-      // 4. 启动指标收集
+      // 4. 启动心跳发送
+      this.startHeartbeats();
+
+      // 5. 启动指标收集
       this.startMetricsCollection();
 
       // 5. 等待测试完成

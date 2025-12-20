@@ -46,6 +46,12 @@ const envSchema = z.object({
   BATCH_WRITE_SIZE: z.string().default('1000').transform(Number),
   BATCH_WRITE_INTERVAL: z.string().default('1000').transform(Number),
 
+  // Queue
+  QUEUE_TYPE: z.enum(['sqlite', 'bullmq']).default('sqlite'),
+  QUEUE_DB_PATH: z.string().default('./data/queue.db'),
+  QUEUE_POLL_INTERVAL: z.string().default('100').transform(Number),
+  QUEUE_MAX_CONCURRENCY: z.string().default('10').transform(Number),
+
   // Aliyun OSS
   ALIOSS_ID: z.string().optional(),
   ALIOSS_SECRET: z.string().optional(),
@@ -59,6 +65,8 @@ const envSchema = z.object({
   // Aliyun SMS
   ALISMS_ID: z.string().optional(),
   ALISMS_SECRET: z.string().optional(),
+  SMS_REGION_ID: z.string().optional(),
+  SMS_SIGN_NAME: z.string().optional(),
 
   // Tencent Map
   TENCETMAP_KEY: z.string().optional(),
@@ -68,6 +76,9 @@ const envSchema = z.object({
   // WeChat Public Account
   WXP_ID: z.string().optional(),
   WXP_SECRET: z.string().optional(),
+  WXP_TEMPLATE_ID: z.string().optional(),
+  WXP_MINIPROGRAM_APPID: z.string().optional(),
+  WXP_MINIPROGRAM_PAGEPATH: z.string().optional(),
 
   // WeChat Open Platform
   WXO_ID: z.string().optional(),
@@ -84,6 +95,8 @@ const envSchema = z.object({
   // Email
   EMAIL_ID: z.string().optional(),
   EMAIL_SECRET: z.string().optional(),
+  EMAIL_FROM_NAME: z.string().optional(),
+  EMAIL_FROM_ADDRESS: z.string().optional(),
 
   // HF Service
   HF_ID: z.string().optional(),

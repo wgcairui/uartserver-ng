@@ -21,6 +21,7 @@ import { socketUserService } from './services/socket-user.service';
 import { terminalCache } from './repositories/terminal-cache';
 import { terminalRepository } from './repositories/terminal.repository';
 import { metricsService } from './services/metrics.service';
+import { initializeServices, closeServices, getServiceContainer } from './services';
 
 /**
  * 构建并配置 Fastify 应用（用于测试）
@@ -129,6 +130,16 @@ export async function build(options: {
 
     // Initialize Socket.IO services after app is ready
     app.addHook('onReady', async () => {
+      // Initialize application services (Queue, Notifications, etc.)
+      try {
+        app.log.info('Initializing application services...');
+        await initializeServices(mongodb.getDatabase());
+        app.log.info('Application services initialized successfully');
+      } catch (error) {
+        app.log.error('Failed to initialize application services:', error);
+        throw error; // 阻止应用启动，因为核心服务失败
+      }
+
       // Warmup terminal cache (load all online terminals)
       try {
         app.log.info('Warming up terminal cache...');
@@ -152,6 +163,14 @@ export async function build(options: {
     // Graceful shutdown
     app.addHook('onClose', async () => {
       app.log.info('Shutting down services...');
+
+      // Close application services
+      try {
+        await closeServices();
+        app.log.info('Application services closed');
+      } catch (error) {
+        app.log.error('Error closing application services:', error);
+      }
 
       // Destroy terminal cache
       try {
