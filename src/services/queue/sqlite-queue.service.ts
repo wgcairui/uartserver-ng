@@ -38,6 +38,7 @@ export class SQLiteQueueService implements QueueService {
   private pollInterval: number;
   private maxConcurrency: number;
   private processingCount = 0;
+  private processingPromise: Promise<void> | null = null;
 
   constructor(config: SQLiteQueueConfig) {
     this.db = new Database(config.dbPath);
@@ -52,6 +53,7 @@ export class SQLiteQueueService implements QueueService {
    * 初始化数据库表结构
    */
   private initSchema(): void {
+    // 创建任务表
     this.db.run(`
       CREATE TABLE IF NOT EXISTS jobs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,9 +67,14 @@ export class SQLiteQueueService implements QueueService {
         created_at INTEGER DEFAULT (unixepoch()),
         started_at INTEGER,
         completed_at INTEGER,
-        error TEXT,
-        INDEX idx_queue_status_priority (queue, status, priority DESC)
+        error TEXT
       )
+    `);
+
+    // 创建索引 (提升查询性能)
+    this.db.run(`
+      CREATE INDEX IF NOT EXISTS idx_queue_status_priority
+      ON jobs (queue, status, priority DESC)
     `);
 
     console.log('[SQLiteQueue] Schema initialized');
@@ -124,31 +131,42 @@ export class SQLiteQueueService implements QueueService {
   /**
    * 启动任务处理循环
    */
-  private async startProcessing(): Promise<void> {
+  private startProcessing(): void {
+    if (this.processingPromise) {
+      return; // Already started
+    }
+
     this.isProcessing = true;
     console.log('[SQLiteQueue] Processing started');
 
-    while (this.isProcessing) {
-      try {
-        // 处理所有队列的任务
-        for (const [queueName, processor] of this.processors) {
-          // 控制并发数
-          if (this.processingCount >= this.maxConcurrency) {
-            break;
+    this.processingPromise = (async () => {
+      while (this.isProcessing) {
+        try {
+          // 处理所有队列的任务
+          for (const [queueName, processor] of this.processors) {
+            // 控制并发数
+            if (this.processingCount >= this.maxConcurrency) {
+              break;
+            }
+
+            await this.processNextJob(queueName, processor);
           }
 
-          await this.processNextJob(queueName, processor);
+          // 短暂休眠，避免 CPU 占用过高
+          await Bun.sleep(this.pollInterval);
+        } catch (error) {
+          console.error('[SQLiteQueue] Processing loop error:', error);
+          await Bun.sleep(1000); // 错误时等待 1 秒
         }
-
-        // 短暂休眠，避免 CPU 占用过高
-        await Bun.sleep(this.pollInterval);
-      } catch (error) {
-        console.error('[SQLiteQueue] Processing loop error:', error);
-        await Bun.sleep(1000); // 错误时等待 1 秒
       }
-    }
 
-    console.log('[SQLiteQueue] Processing stopped');
+      // 等待所有正在处理的任务完成
+      while (this.processingCount > 0) {
+        await Bun.sleep(50);
+      }
+
+      console.log('[SQLiteQueue] Processing stopped');
+    })();
   }
 
   /**
@@ -270,27 +288,22 @@ export class SQLiteQueueService implements QueueService {
   }
 
   /**
-   * 获取队列统计信息
+   * 获取队列统计信息 (实现 QueueService 接口)
    */
-  async getStats(queueName?: string): Promise<QueueStats> {
-    const query = queueName
-      ? `SELECT
-          status,
-          COUNT(*) as count
-        FROM jobs
-        WHERE queue = ?
-        GROUP BY status`
-      : `SELECT
-          status,
-          COUNT(*) as count
-        FROM jobs
-        GROUP BY status`;
+  getQueueStats(queueName: string): QueueStats {
+    const query = `
+      SELECT
+        status,
+        COUNT(*) as count
+      FROM jobs
+      WHERE queue = ?
+      GROUP BY status
+    `;
 
     const stmt = this.db.prepare(query);
-    const rows = queueName ? stmt.all(queueName) : stmt.all();
+    const rows = stmt.all(queueName);
 
     const stats: QueueStats = {
-      queueName,
       pending: 0,
       processing: 0,
       completed: 0,
@@ -299,8 +312,8 @@ export class SQLiteQueueService implements QueueService {
 
     for (const row of rows as any[]) {
       const status = row.status as string;
-      if (status === 'pending' || status === 'processing' || status === 'completed' || status === 'failed') {
-        stats[status] = row.count;
+      if (status in stats) {
+        stats[status as keyof QueueStats] = row.count;
       }
     }
 
@@ -308,30 +321,40 @@ export class SQLiteQueueService implements QueueService {
   }
 
   /**
-   * 清理已完成/失败的旧任务
+   * 清理已完成/失败的旧任务 (实现 QueueService 接口)
    *
+   * @param queueName - 队列名称（可选，不指定则清理所有队列）
    * @param olderThanDays - 清理多少天前的任务
    */
-  async cleanup(olderThanDays: number = 7): Promise<number> {
+  async cleanup(queueName?: string, olderThanDays: number = 7): Promise<void> {
     const cutoffTimestamp = Math.floor(Date.now() / 1000) - olderThanDays * 24 * 60 * 60;
 
-    const stmt = this.db.prepare(`
-      DELETE FROM jobs
-      WHERE status IN ('completed', 'failed')
-        AND completed_at < ?
-    `);
+    const query = queueName
+      ? `DELETE FROM jobs
+         WHERE queue = ? AND status IN ('completed', 'failed') AND completed_at <= ?`
+      : `DELETE FROM jobs
+         WHERE status IN ('completed', 'failed') AND completed_at <= ?`;
 
-    const result = stmt.run(cutoffTimestamp);
-    console.log(`[SQLiteQueue] Cleaned up ${result.changes} old jobs`);
+    const stmt = this.db.prepare(query);
+    const result = queueName ? stmt.run(queueName, cutoffTimestamp) : stmt.run(cutoffTimestamp);
 
-    return result.changes;
+    console.log(`[SQLiteQueue] Cleaned up ${result.changes} old jobs${queueName ? ` from queue ${queueName}` : ''}`);
   }
 
   /**
    * 关闭队列服务
    */
   async close(): Promise<void> {
+    // 停止处理循环
     this.isProcessing = false;
+
+    // 等待处理循环完全停止
+    if (this.processingPromise) {
+      await this.processingPromise;
+      this.processingPromise = null;
+    }
+
+    // 关闭数据库
     this.db.close();
     console.log('[SQLiteQueue] Closed');
   }
