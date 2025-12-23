@@ -18,6 +18,7 @@ import { TerminalApiController } from './controllers/terminal-api.controller';
 import { DataApiController } from './controllers/data-api.controller';
 import { AlarmApiController } from './controllers/alarm-api.controller';
 import { ProtocolApiController } from './controllers/protocol-api.controller';
+import { ConfigApiController } from './controllers/config-api.controller';
 import { DtuController } from './controllers/dtu.controller';
 import { AuthController } from './controllers/auth.controller';
 import { UserController } from './controllers/user.controller';
@@ -234,6 +235,7 @@ export async function build(options: {
     DataApiController,
     AlarmApiController,
     ProtocolApiController,
+    ConfigApiController,
     DtuController,
     AuthController,
     UserController,
