@@ -34,6 +34,9 @@ export * from './terminal.entity';
 // Data (设备数据 - Phase 4.2 Day 2)
 export * from './data.entity';
 
+// Protocol (协议定义 - Phase 4.2 Day 3)
+export * from './protocol.entity';
+
 /**
  * 所有集合的索引配置
  */
@@ -96,6 +99,15 @@ import {
   type SingleDataDocument,
 } from './data.entity';
 
+import {
+  PROTOCOL_COLLECTION,
+  PROTOCOL_INDEXES,
+  USER_PROTOCOL_CONFIG_COLLECTION,
+  USER_PROTOCOL_CONFIG_INDEXES,
+  type ProtocolDocument,
+  type UserProtocolConfigDocument,
+} from './protocol.entity';
+
 import type { Db, IndexDescription } from 'mongodb';
 
 /**
@@ -157,6 +169,14 @@ export const PHASE3_COLLECTIONS: CollectionConfig[] = [
   {
     name: SINGLE_DATA_COLLECTION,
     indexes: SINGLE_DATA_INDEXES as unknown as IndexDescription[],
+  },
+  {
+    name: PROTOCOL_COLLECTION,
+    indexes: PROTOCOL_INDEXES as unknown as IndexDescription[],
+  },
+  {
+    name: USER_PROTOCOL_CONFIG_COLLECTION,
+    indexes: USER_PROTOCOL_CONFIG_INDEXES as unknown as IndexDescription[],
   },
 ];
 
@@ -259,5 +279,13 @@ export class Phase3Collections {
 
   get singleData() {
     return this.db.collection<SingleDataDocument>(SINGLE_DATA_COLLECTION);
+  }
+
+  get protocols() {
+    return this.db.collection<ProtocolDocument>(PROTOCOL_COLLECTION);
+  }
+
+  get userProtocolConfigs() {
+    return this.db.collection<UserProtocolConfigDocument>(USER_PROTOCOL_CONFIG_COLLECTION);
   }
 }

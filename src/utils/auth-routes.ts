@@ -16,6 +16,8 @@ export function setupAuthMiddleware(app: FastifyInstance) {
     '/api/auth/logout',
     '/api/terminals', // Phase 4.2 Day 1: Terminal API (all endpoints require authentication)
     '/api/data', // Phase 4.2 Day 2: Data API (all endpoints require authentication)
+    '/api/alarms', // Phase 4.2 Day 3: Alarm API (all endpoints require authentication)
+    '/api/protocols', // Phase 4.2 Day 3: Protocol API (all endpoints require authentication)
   ];
 
   // 需要管理员权限的路由模式

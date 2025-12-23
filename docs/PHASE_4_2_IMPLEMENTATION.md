@@ -43,10 +43,10 @@
 **本阶段实现** (核心用户 API):
 - ✅ 用户认证 API (Phase 4.1 已完成)
 - ✅ **设备管理 API (8 个端点) - Day 1 完成 (2025-12-23)**
-- 🎯 数据查询 API (6 个端点)
-- 🎯 告警管理 API (5 个端点)
-- 🎯 协议管理 API (4 个端点)
-- 🎯 用户配置 API (3 个端点)
+- ✅ **数据查询 API (6 个端点) - Day 2 完成 (2025-12-23)**
+- ⏳ **告警管理 API (5 个端点) - Day 3 进行中 (40% 完成)**
+- 🎯 协议管理 API (4 个端点) - Day 3
+- 🎯 用户配置 API (3 个端点) - Day 4
 
 **后续阶段**:
 - Phase 4.3: 管理员 API
@@ -76,25 +76,25 @@ src/
 │   ├── auth.controller.ts        # ✅ Phase 4.1 已完成
 │   ├── user.controller.ts        # ✅ Phase 4.1 已完成
 │   ├── terminal-api.controller.ts # ✅ Day 1 已完成
-│   ├── data.controller.ts        # 🎯 本阶段
-│   ├── alarm.controller.ts       # 🎯 本阶段
-│   ├── protocol.controller.ts    # 🎯 本阶段
-│   └── config.controller.ts      # 🎯 本阶段
+│   ├── data-api.controller.ts    # ✅ Day 2 已完成
+│   ├── alarm-api.controller.ts   # ⏳ Day 3 进行中
+│   ├── protocol-api.controller.ts # 🎯 Day 3 待实现
+│   └── config.controller.ts      # 🎯 Day 4 待实现
 ├── services/                 # 业务逻辑层
 │   ├── terminal-api.service.ts   # ✅ Day 1 已完成
-│   ├── data.service.ts           # 🎯 本阶段
-│   ├── alarm.service.ts          # 部分完成，需扩展
-│   └── protocol.service.ts       # 🎯 本阶段
+│   ├── data-api.service.ts       # ✅ Day 2 已完成
+│   ├── alarm-api.service.ts      # ✅ Day 3 已完成
+│   └── protocol-api.service.ts   # 🎯 Day 3 待实现
 ├── schemas/                  # Zod 验证 schemas
-│   ├── terminal.schema.ts        # ✅ Day 1 已完成（扩展）
-│   ├── data.schema.ts           # 🎯 本阶段
-│   ├── alarm.schema.ts          # 🎯 本阶段
-│   └── protocol.schema.ts       # 🎯 本阶段
+│   ├── terminal.schema.ts        # ✅ Day 1 已完成
+│   ├── data.schema.ts            # ✅ Day 2 已完成
+│   ├── alarm.schema.ts           # ✅ Day 3 已完成
+│   └── protocol.schema.ts        # ✅ Day 3 已完成
 ├── entities/
 │   └── mongodb/              # MongoDB 实体
 │       ├── terminal.entity.ts   # ✅ Day 1 已完成
-│       ├── data.entity.ts       # 🎯 新建
-│       └── protocol.entity.ts   # 需扩展
+│       ├── data.entity.ts       # ✅ Day 2 已完成
+│       └── protocol.entity.ts   # ✅ Day 3 已完成
 └── middleware/
     └── auth.ts              # ✅ Phase 4.1 已完成
 ```

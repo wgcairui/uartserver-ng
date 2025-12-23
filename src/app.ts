@@ -16,6 +16,8 @@ import { registerControllers } from './utils/route-loader';
 import { TerminalController } from './controllers/terminal.controller';
 import { TerminalApiController } from './controllers/terminal-api.controller';
 import { DataApiController } from './controllers/data-api.controller';
+import { AlarmApiController } from './controllers/alarm-api.controller';
+import { ProtocolApiController } from './controllers/protocol-api.controller';
 import { DtuController } from './controllers/dtu.controller';
 import { AuthController } from './controllers/auth.controller';
 import { UserController } from './controllers/user.controller';
@@ -230,6 +232,8 @@ export async function build(options: {
     TerminalController,
     TerminalApiController,
     DataApiController,
+    AlarmApiController,
+    ProtocolApiController,
     DtuController,
     AuthController,
     UserController,
