@@ -26,7 +26,15 @@ export interface LegacyLayoutItem {
   name: string;
   color: string;
   bind: LegacyLayoutBind;
-  result?: any; // 注入的实时数据
+  result?: {
+    // 实时数据字段
+    name: string;
+    value: string | number;
+    unit?: string;
+    parseValue?: number;
+    alarm?: boolean;
+    [key: string]: unknown;
+  } | null; // 注入的实时数据
 }
 
 /**
@@ -52,6 +60,18 @@ export interface LegacyAggregationDevice {
   mountDev: string;
   protocol: string;
   pid: number;
+  // 实时注入字段 (Phase 4.2 Day 5)
+  online?: boolean; // 设备在线状态
+  lastSeen?: Date | null; // 最后在线时间
+  data?: Array<{
+    // 设备最新数据
+    name: string;
+    value: string | number;
+    unit?: string;
+    parseValue?: number;
+    alarm?: boolean;
+    [key: string]: unknown;
+  }>;
 }
 
 /**

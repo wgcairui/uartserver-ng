@@ -118,9 +118,28 @@ export interface DeviceStatusUpdate {
 }
 
 /**
+ * 设备配置变更推送
+ */
+export interface DeviceConfigUpdate {
+  type: 'config';
+  mac: string;
+  pid: number;
+  timestamp: number;
+  data: {
+    interval?: number; // 查询间隔变更
+    type: string; // 配置变更类型
+    [key: string]: any; // 其他配置数据
+  };
+}
+
+/**
  * 设备更新类型（联合类型）
  */
-export type DeviceUpdate = DeviceDataUpdate | DeviceAlarmUpdate | DeviceStatusUpdate;
+export type DeviceUpdate =
+  | DeviceDataUpdate
+  | DeviceAlarmUpdate
+  | DeviceStatusUpdate
+  | DeviceConfigUpdate;
 
 /**
  * 批量设备更新（性能优化）
