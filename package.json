@@ -22,6 +22,8 @@
     "@fastify/helmet": "^13.0.2",
     "@fastify/jwt": "^10.0.0",
     "@fastify/rate-limit": "^10.3.0",
+    "@types/bcrypt": "^6.0.0",
+    "bcrypt": "^6.0.0",
     "bullmq": "^5.66.1",
     "crc": "^4.3.2",
     "eventemitter3": "^5.0.1",

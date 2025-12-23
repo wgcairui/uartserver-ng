@@ -15,6 +15,9 @@ import { mongodb } from './database/mongodb';
 import { registerControllers } from './utils/route-loader';
 import { TerminalController } from './controllers/terminal.controller';
 import { DtuController } from './controllers/dtu.controller';
+import { AuthController } from './controllers/auth.controller';
+import { UserController } from './controllers/user.controller';
+import { setupAuthMiddleware } from './utils/auth-routes';
 import { webSocketService } from './services/websocket.service';
 import { socketIoService } from './services/socket-io.service';
 import { socketUserService } from './services/socket-user.service';
@@ -221,7 +224,10 @@ export async function build(options: {
   });
 
   // 注册控制器
-  registerControllers(app, [TerminalController, DtuController]);
+  registerControllers(app, [TerminalController, DtuController, AuthController, UserController]);
+
+  // 设置认证中间件
+  setupAuthMiddleware(app);
 
   return app;
 }

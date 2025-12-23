@@ -939,6 +939,160 @@ private async getTransporter(): Promise<Transporter> {
 
 ---
 
+## 🚀 Phase 4: 用户认证与授权系统
+
+**开始日期**: 2025-12-20
+**当前状态**: Phase 4.1 规划中
+**预计工时**: 40 小时
+
+### Phase 4.1: 用户认证与授权
+
+**目标**: 实现安全可靠的用户认证和权限控制系统,为 API 提供安全保障
+
+**核心功能**:
+```typescript
+1. 用户认证
+   - JWT Token 认证
+   - Session 管理
+   - 密码加密 (bcrypt)
+   - 登录/登出
+
+2. 权限控制 (RBAC)
+   - 角色定义: Admin, User, Guest
+   - 权限检查中间件
+   - 资源访问控制
+   - 设备权限隔离
+
+3. 用户管理 API
+   - 用户注册/登录
+   - 用户信息修改
+   - 密码重置
+   - 用户列表 (Admin)
+```
+
+**技术选型**:
+- **JWT**: `jsonwebtoken` + `@fastify/jwt`
+- **密码加密**: `bcrypt`
+- **数据库**: MongoDB (users 集合)
+- **中间件**: Fastify Hook 系统
+
+**数据库设计**:
+```typescript
+// users 集合
+interface UserDocument {
+  _id: ObjectId;
+  username: string;           // 唯一用户名
+  email: string;             // 唯一邮箱
+  passwordHash: string;      // bcrypt 加密
+  role: 'admin' | 'user' | 'guest';
+  permissions: string[];     // 权限列表
+  devices?: string[];        // 可访问的设备 MAC 列表
+  createdAt: Date;
+  updatedAt: Date;
+  lastLoginAt?: Date;
+  isActive: boolean;
+}
+```
+
+**API 设计**:
+```typescript
+// 认证相关
+POST   /api/auth/register     // 用户注册
+POST   /api/auth/login        // 用户登录
+POST   /api/auth/logout       // 用户登出
+POST   /api/auth/refresh      // 刷新 Token
+GET    /api/auth/me           // 获取当前用户信息
+
+// 用户管理 (需要权限)
+GET    /api/users             // 获取用户列表 (Admin)
+GET    /api/users/:id         // 获取用户详情
+PUT    /api/users/:id         // 更新用户信息
+DELETE /api/users/:id         // 删除用户 (Admin)
+POST   /api/users/:id/password // 重置密码
+```
+
+**安全措施**:
+```typescript
+1. 密码安全
+   - bcrypt 加密 (salt rounds: 12)
+   - 密码强度验证
+   - 防止暴力破解 (失败次数限制)
+
+2. Token 安全
+   - JWT 短期有效期 (15分钟)
+   - Refresh Token 长期有效期 (7天)
+   - Token 黑名单机制
+
+3. 会话安全
+   - 单设备登录限制
+   - 会话超时自动登出
+   - 登录审计日志
+
+4. API 安全
+   - Rate Limiting
+   - CORS 配置
+   - Helmet 安全头
+```
+
+**与老系统对比**:
+
+| 功能 | 老系统 | 新系统 | 改进 |
+|------|--------|--------|------|
+| 认证方式 | Session | JWT | 无状态,支持分布式 |
+| 权限控制 | 简单角色 | RBAC | 更细粒度权限控制 |
+| 设备权限 | 无 | 设备级权限隔离 | 提高安全性 |
+| API 安全 | 基础 | 多层防护 | 显著提升安全级别 |
+| 密码存储 | 明文/弱加密 | bcrypt | 符合安全标准 |
+
+**实施计划**:
+
+**Day 1**: 基础架构 (8 小时)
+- [ ] 创建用户实体和数据库模型
+- [ ] 实现 JWT 工具函数
+- [ ] 创建认证中间件
+- [ ] 基础的密码加密/验证
+
+**Day 2**: API 开发 (8 小时)
+- [ ] 用户注册 API
+- [ ] 用户登录 API
+- [ ] Token 刷新 API
+- [ ] 获取当前用户 API
+
+**Day 3**: 权限系统 (8 小时)
+- [ ] RBAC 权限模型实现
+- [ ] 权限检查中间件
+- [ ] 设备权限隔离
+- [ ] 管理员 API
+
+**Day 4**: 测试与文档 (6 小时)
+- [ ] 单元测试覆盖
+- [ ] 集成测试
+- [ ] API 文档更新
+- [ ] 安全测试
+
+**验收标准**:
+- ✅ 用户可以安全注册和登录
+- ✅ JWT Token 正确生成和验证
+- ✅ 权限控制正确工作
+- ✅ 设备权限隔离有效
+- ✅ 所有 API 有完整的测试覆盖
+- ✅ 与老系统功能对比完成
+
+**风险和缓解**:
+1. **向后兼容性**
+   - 风险: 老客户端无法访问新 API
+   - 缓解: 提供过渡期双认证支持
+
+2. **数据迁移**
+   - 风险: 用户数据丢失或损坏
+   - 缓解: 完整的备份和迁移脚本
+
+3. **性能影响**
+   - 风险: JWT 验证增加延迟
+   - 缓解: 优化验证逻辑,使用缓存
+
+---
+
 ## 📈 总体进度
 
 | Phase | 状态 | 完成度 | 工时 |
@@ -947,8 +1101,9 @@ private async getTransporter(): Promise<Transporter> {
 | Phase 2: 实时通信 | ✅ 完成 | 100% | 80h |
 | Phase 3.1: 队列服务 | ✅ 完成 | 100% | 4h |
 | **Phase 3.2: 通知渠道** | **✅ 完成** | **100%** | **3h** |
-| Phase 4: 用户系统 | ⏳ 待开始 | 0% | ~40h |
+| **Phase 4.1: 用户认证** | **⏳ 进行中** | **0%** | **~30h** |
+| Phase 4.2: API 网关 | ⏳ 待开始 | 0% | ~10h |
 | Phase 5: 部署运维 | ⏳ 待开始 | 0% | ~20h |
 
-**总进度**: ~65% (4/6 阶段完成)
+**总进度**: ~65% (4.5/6 阶段完成)
 

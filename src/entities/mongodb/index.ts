@@ -16,6 +16,18 @@ export * from './notification-log.entity';
 // User Alarm Setup (对齐现有 UserAlarmSetup)
 export * from './user-alarm-setup.entity';
 
+// User (认证系统)
+export * from './user.entity';
+
+// WeChat User (微信小程序认证)
+export * from './wx-user.entity';
+
+// Login Log (登录日志 - 安全审计)
+export * from './login-log.entity';
+
+// User Bind Device (用户设备绑定)
+export * from './user-bind-device.entity';
+
 /**
  * 所有集合的索引配置
  */
@@ -35,6 +47,30 @@ import {
   USER_ALARM_SETUP_INDEXES,
   type UserAlarmSetupDocument,
 } from './user-alarm-setup.entity';
+
+import {
+  USER_COLLECTION,
+  USER_INDEXES,
+  type UserDocument,
+} from './user.entity';
+
+import {
+  WX_USER_COLLECTION,
+  WX_USER_INDEXES,
+  type WxUserDocument,
+} from './wx-user.entity';
+
+import {
+  LOGIN_LOG_COLLECTION,
+  LOGIN_LOG_INDEXES,
+  type LoginLogDocument,
+} from './login-log.entity';
+
+import {
+  USER_BIND_DEVICE_COLLECTION,
+  USER_BIND_DEVICE_INDEXES,
+  type UserBindDeviceDocument,
+} from './user-bind-device.entity';
 
 import type { Db, IndexDescription } from 'mongodb';
 
@@ -65,6 +101,22 @@ export const PHASE3_COLLECTIONS: CollectionConfig[] = [
   {
     name: USER_ALARM_SETUP_COLLECTION,
     indexes: USER_ALARM_SETUP_INDEXES as unknown as IndexDescription[],
+  },
+  {
+    name: USER_COLLECTION,
+    indexes: USER_INDEXES as unknown as IndexDescription[],
+  },
+  {
+    name: WX_USER_COLLECTION,
+    indexes: WX_USER_INDEXES as unknown as IndexDescription[],
+  },
+  {
+    name: LOGIN_LOG_COLLECTION,
+    indexes: LOGIN_LOG_INDEXES as unknown as IndexDescription[],
+  },
+  {
+    name: USER_BIND_DEVICE_COLLECTION,
+    indexes: USER_BIND_DEVICE_INDEXES as unknown as IndexDescription[],
   },
 ];
 
@@ -135,5 +187,21 @@ export class Phase3Collections {
 
   get userAlarmSetups() {
     return this.db.collection<UserAlarmSetupDocument>(USER_ALARM_SETUP_COLLECTION);
+  }
+
+  get users() {
+    return this.db.collection<UserDocument>(USER_COLLECTION);
+  }
+
+  get wxUsers() {
+    return this.db.collection<WxUserDocument>(WX_USER_COLLECTION);
+  }
+
+  get loginLogs() {
+    return this.db.collection<LoginLogDocument>(LOGIN_LOG_COLLECTION);
+  }
+
+  get userBindDevices() {
+    return this.db.collection<UserBindDeviceDocument>(USER_BIND_DEVICE_COLLECTION);
   }
 }

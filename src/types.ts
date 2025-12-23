@@ -4,17 +4,20 @@
  */
 
 import 'fastify';
+import type { JWTPayload } from './entities/mongodb/user.entity';
+import type { SanitizedUser } from './utils/jwt';
 
 declare module 'fastify' {
   interface FastifyRequest {
     /**
-     * 已认证的用户信息
+     * 已认证的用户信息 (已移除敏感字段)
      * 由认证中间件设置
      */
-    user?: {
-      userId: string;
-      username: string;
-      [key: string]: any;
-    };
+    user?: SanitizedUser;
+
+    /**
+     * JWT 载荷
+     */
+    jwtPayload?: JWTPayload;
   }
 }

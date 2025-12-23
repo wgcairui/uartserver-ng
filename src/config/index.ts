@@ -33,6 +33,7 @@ const envSchema = z.object({
 
   // JWT
   JWT_SECRET: z.string().default('your-super-secret-jwt-key-change-this-in-production'),
+  JWT_REFRESH_SECRET: z.string().optional(),
 
   // Node Client Authentication
   NODE_SECRET: z.string().default('your-node-client-secret-change-this-in-production'),
