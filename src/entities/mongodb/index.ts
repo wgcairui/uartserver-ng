@@ -31,6 +31,9 @@ export * from './user-bind-device.entity';
 // Terminal (终端设备)
 export * from './terminal.entity';
 
+// Data (设备数据 - Phase 4.2 Day 2)
+export * from './data.entity';
+
 /**
  * 所有集合的索引配置
  */
@@ -81,6 +84,18 @@ import {
   type TerminalDocument,
 } from './terminal.entity';
 
+import {
+  DATA_RECORD_COLLECTION,
+  DATA_RECORD_INDEXES,
+  PARSED_DATA_COLLECTION,
+  PARSED_DATA_INDEXES,
+  SINGLE_DATA_COLLECTION,
+  SINGLE_DATA_INDEXES,
+  type DataRecordDocument,
+  type ParsedDataDocument,
+  type SingleDataDocument,
+} from './data.entity';
+
 import type { Db, IndexDescription } from 'mongodb';
 
 /**
@@ -130,6 +145,18 @@ export const PHASE3_COLLECTIONS: CollectionConfig[] = [
   {
     name: TERMINAL_COLLECTION,
     indexes: TERMINAL_INDEXES as unknown as IndexDescription[],
+  },
+  {
+    name: DATA_RECORD_COLLECTION,
+    indexes: DATA_RECORD_INDEXES as unknown as IndexDescription[],
+  },
+  {
+    name: PARSED_DATA_COLLECTION,
+    indexes: PARSED_DATA_INDEXES as unknown as IndexDescription[],
+  },
+  {
+    name: SINGLE_DATA_COLLECTION,
+    indexes: SINGLE_DATA_INDEXES as unknown as IndexDescription[],
   },
 ];
 
@@ -220,5 +247,17 @@ export class Phase3Collections {
 
   get terminals() {
     return this.db.collection<TerminalDocument>(TERMINAL_COLLECTION);
+  }
+
+  get dataRecords() {
+    return this.db.collection<DataRecordDocument>(DATA_RECORD_COLLECTION);
+  }
+
+  get parsedData() {
+    return this.db.collection<ParsedDataDocument>(PARSED_DATA_COLLECTION);
+  }
+
+  get singleData() {
+    return this.db.collection<SingleDataDocument>(SINGLE_DATA_COLLECTION);
   }
 }
