@@ -14,6 +14,7 @@ import { config } from './config';
 import { mongodb } from './database/mongodb';
 import { registerControllers } from './utils/route-loader';
 import { TerminalController } from './controllers/terminal.controller';
+import { TerminalApiController } from './controllers/terminal-api.controller';
 import { DtuController } from './controllers/dtu.controller';
 import { AuthController } from './controllers/auth.controller';
 import { UserController } from './controllers/user.controller';
@@ -224,7 +225,13 @@ export async function build(options: {
   });
 
   // 注册控制器
-  registerControllers(app, [TerminalController, DtuController, AuthController, UserController]);
+  registerControllers(app, [
+    TerminalController,
+    TerminalApiController,
+    DtuController,
+    AuthController,
+    UserController,
+  ]);
 
   // 设置认证中间件
   setupAuthMiddleware(app);

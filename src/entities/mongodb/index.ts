@@ -28,6 +28,9 @@ export * from './login-log.entity';
 // User Bind Device (用户设备绑定)
 export * from './user-bind-device.entity';
 
+// Terminal (终端设备)
+export * from './terminal.entity';
+
 /**
  * 所有集合的索引配置
  */
@@ -71,6 +74,12 @@ import {
   USER_BIND_DEVICE_INDEXES,
   type UserBindDeviceDocument,
 } from './user-bind-device.entity';
+
+import {
+  TERMINAL_COLLECTION,
+  TERMINAL_INDEXES,
+  type TerminalDocument,
+} from './terminal.entity';
 
 import type { Db, IndexDescription } from 'mongodb';
 
@@ -117,6 +126,10 @@ export const PHASE3_COLLECTIONS: CollectionConfig[] = [
   {
     name: USER_BIND_DEVICE_COLLECTION,
     indexes: USER_BIND_DEVICE_INDEXES as unknown as IndexDescription[],
+  },
+  {
+    name: TERMINAL_COLLECTION,
+    indexes: TERMINAL_INDEXES as unknown as IndexDescription[],
   },
 ];
 
@@ -203,5 +216,9 @@ export class Phase3Collections {
 
   get userBindDevices() {
     return this.db.collection<UserBindDeviceDocument>(USER_BIND_DEVICE_COLLECTION);
+  }
+
+  get terminals() {
+    return this.db.collection<TerminalDocument>(TERMINAL_COLLECTION);
   }
 }
