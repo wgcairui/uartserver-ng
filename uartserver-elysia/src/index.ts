@@ -30,6 +30,7 @@ import { protocolRoutes } from './routes/protocol.route';
 import { deviceTypeRoutes } from './routes/device-type.route';
 import { terminalManagementRoutes } from './routes/terminal-management.route';
 import { wechatRoutes } from './routes/wechat.route';
+import { smsRoutes } from './routes/sms.route';
 
 // 数据库
 import { mongodb } from './database/mongodb';
@@ -128,7 +129,10 @@ const app = new Elysia()
   // ✅ WeChat Routes (Phase 8.4)
   .use(wechatRoutes)
 
-  // TODO: 待迁移的 Controllers (Phase 8.4+)
+  // ✅ SMS Routes (Phase 8.5)
+  .use(smsRoutes)
+
+  // TODO: 待迁移的 Controllers (Phase 8.6+)
   // ... 其他路由
 
   // ============================================================================
