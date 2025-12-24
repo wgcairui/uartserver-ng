@@ -1,0 +1,481 @@
+/**
+ * MongoDB 索引管理服务
+ * 自动创建和管理所有集合的索引
+ */
+
+import type { Db, IndexDescription, CreateIndexesOptions } from 'mongodb';
+
+/**
+ * 索引定义接口
+ */
+interface IndexSpec {
+  key: Record<string, 1 | -1>;
+  options?: CreateIndexesOptions;
+}
+
+interface IndexDefinition {
+  collection: string;
+  indexes: IndexSpec[];
+}
+
+/**
+ * 索引管理服务类
+ */
+export class IndexManager {
+  private db: Db;
+
+  constructor(db: Db) {
+    this.db = db;
+  }
+
+  /**
+   * 确保所有索引存在
+   */
+  async ensureAllIndexes(): Promise<void> {
+    console.log('📋 开始创建/更新索引...');
+    const startTime = Date.now();
+
+    const indexDefinitions = this.getIndexDefinitions();
+    let totalCreated = 0;
+    let totalExisting = 0;
+
+    for (const def of indexDefinitions) {
+      try {
+        const result = await this.ensureCollectionIndexes(def);
+        totalCreated += result.created;
+        totalExisting += result.existing;
+      } catch (error) {
+        console.error(`❌ 集合 ${def.collection} 索引创建失败:`, error);
+        throw error;
+      }
+    }
+
+    const duration = Date.now() - startTime;
+    console.log(`✅ 索引创建/更新完成: ${totalCreated} 个新建, ${totalExisting} 个已存在, 耗时 ${duration}ms`);
+  }
+
+  /**
+   * 为单个集合创建索引
+   * 如果遇到重复键错误，自动清理重复数据并重试
+   */
+  private async ensureCollectionIndexes(def: IndexDefinition): Promise<{
+    created: number;
+    existing: number;
+  }> {
+    const collection = this.db.collection(def.collection);
+    let created = 0;
+    let existing = 0;
+
+    console.log(`  📂 ${def.collection}: 创建 ${def.indexes.length} 个索引...`);
+
+    for (const index of def.indexes) {
+      const indexName = this.generateIndexName(index.key);
+      const options: CreateIndexesOptions = {
+        ...index.options,
+        name: index.options?.name || indexName,
+        background: true, // 后台创建，不阻塞数据库
+      };
+
+      try {
+        await collection.createIndex(index.key, options);
+        created++;
+        console.log(`    ✓ ${indexName}`);
+      } catch (error: any) {
+        // 索引已存在的错误可以忽略 (code 85: IndexOptionsConflict, code 86: IndexKeySpecsConflict)
+        if (error.code === 85 || error.code === 86) {
+          existing++;
+          console.log(`    ○ ${indexName} (已存在)`);
+        } else if (error.code === 11000) {
+          // E11000 重复键错误 - 尝试清理并重试
+          console.log(`    ⚠️  ${indexName} 存在重复数据，开始清理...`);
+
+          const cleaned = await this.cleanDuplicateData(def.collection, index.key, index.options);
+
+          if (cleaned > 0) {
+            console.log(`    ✓ 已清理 ${cleaned} 条重复数据，重试创建索引...`);
+            try {
+              await collection.createIndex(index.key, options);
+              created++;
+              console.log(`    ✓ ${indexName} (清理后创建成功)`);
+            } catch (retryError: any) {
+              console.error(`    ✗ ${indexName} 清理后仍然失败:`, retryError.message);
+              throw retryError;
+            }
+          } else {
+            console.error(`    ✗ ${indexName} 未找到可清理的重复数据`);
+            throw error;
+          }
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    return { created, existing };
+  }
+
+  /**
+   * 生成索引名称
+   */
+  private generateIndexName(key: Record<string, 1 | -1>): string {
+    return Object.entries(key)
+      .map(([field, direction]) => `${field}_${direction}`)
+      .join('_');
+  }
+
+  /**
+   * 清理重复数据
+   * @param collectionName - 集合名称
+   * @param indexKey - 索引键
+   * @param indexOptions - 索引选项
+   * @returns 清理的记录数
+   */
+  private async cleanDuplicateData(
+    collectionName: string,
+    indexKey: Record<string, 1 | -1>,
+    indexOptions?: CreateIndexesOptions
+  ): Promise<number> {
+    const collection = this.db.collection(collectionName);
+    const fields = Object.keys(indexKey);
+    let totalCleaned = 0;
+
+    // 特殊处理：如果是 sparse 索引，先清理 null 值（转为缺失字段）
+    if (indexOptions?.sparse && fields.length === 1) {
+      const field = fields[0]!; // Non-null assertion since we checked length === 1
+
+      // 1. 将 null 转为缺失字段
+      const nullFilter: any = {};
+      nullFilter[field] = null;
+      const nullUpdate: any = { $unset: {} };
+      nullUpdate.$unset[field] = '';
+      const nullToMissingResult = await collection.updateMany(nullFilter, nullUpdate);
+
+      if (nullToMissingResult.modifiedCount > 0) {
+        console.log(`      → 已将 ${nullToMissingResult.modifiedCount} 个 null 值转为缺失字段`);
+      }
+
+      // 2. 将空字符串转为 null 再转为缺失字段
+      const emptyFilter: any = {};
+      emptyFilter[field] = '';
+      const emptyUpdate: any = { $set: {} };
+      emptyUpdate.$set[field] = null;
+      const emptyResult = await collection.updateMany(emptyFilter, emptyUpdate);
+
+      if (emptyResult.modifiedCount > 0) {
+        const emptyToMissingResult = await collection.updateMany(nullFilter, nullUpdate);
+        console.log(`      → 已将 ${emptyToMissingResult.modifiedCount} 个空字符串转为缺失字段`);
+      }
+    }
+
+    // 构建聚合管道查找重复数据
+    const groupBy: Record<string, string> = {};
+    fields.forEach((f) => {
+      groupBy[f] = `$${f}`;
+    });
+
+    const duplicates = await collection
+      .aggregate([
+        {
+          $group: {
+            _id: fields.length === 1 ? `$${fields[0]}` : groupBy,
+            count: { $sum: 1 },
+            ids: { $push: '$_id' },
+          },
+        },
+        { $match: { count: { $gt: 1 } } },
+      ])
+      .toArray();
+
+    if (duplicates.length === 0) {
+      return 0;
+    }
+
+    console.log(`      → 发现 ${duplicates.length} 组重复数据`);
+
+    // 删除每组的重复记录（保留第一个）
+    for (const dup of duplicates) {
+      const idsToDelete = dup.ids.slice(1);
+      const result = await collection.deleteMany({
+        _id: { $in: idsToDelete },
+      });
+      totalCleaned += result.deletedCount || 0;
+    }
+
+    return totalCleaned;
+  }
+
+  /**
+   * 获取所有索引定义
+   * 总计 24 个集合，65 个索引
+   */
+  private getIndexDefinitions(): IndexDefinition[] {
+    return [
+      // ============ 核心业务集合 (3个) ============
+      {
+        collection: 'terminals',
+        indexes: [
+          { key: { DevMac: 1 }, options: { unique: true } },
+          { key: { online: 1 } },
+          { key: { ICCID: 1 } },
+          { key: { mountNode: 1 } },
+          { key: { ownerId: 1 } },
+          { key: { 'mountDevs.pid': 1 } },
+          { key: { online: 1, UT: -1 } },
+        ],
+      },
+
+      {
+        collection: 'client.resultcolltions',
+        indexes: [
+          { key: { mac: 1, pid: 1, timeStamp: -1 } }, // 最重要的复合索引
+          { key: { timeStamp: -1 } },
+          { key: { hasAlarm: 1, timeStamp: -1 } },
+          { key: { parentId: 1 } },
+        ],
+      },
+
+      {
+        collection: 'client.resultsingles',
+        indexes: [
+          { key: { mac: 1, pid: 1 } },
+          { key: { parentId: 1 } },
+        ],
+      },
+
+      // ============ 用户相关集合 (6个) ============
+      {
+        collection: 'users',
+        indexes: [
+          { key: { userId: 1 }, options: { unique: true, sparse: true } },
+          { key: { user: 1 }, options: { unique: true } },
+          { key: { tel: 1 }, options: { unique: true, sparse: true } },
+          { key: { openId: 1 } },
+          { key: { userGroup: 1 } },
+        ],
+      },
+
+      {
+        collection: 'user.binddevices',
+        indexes: [{ key: { user: 1 }, options: { unique: true } }],
+      },
+
+      {
+        collection: 'user.aggregations',
+        indexes: [{ key: { user: 1, id: 1 }, options: { unique: true } }],
+      },
+
+      {
+        collection: 'user.layouts',
+        indexes: [{ key: { user: 1, type: 1 } }],
+      },
+
+      {
+        collection: 'user.wxpubilcs',
+        indexes: [
+          { key: { openid: 1 }, options: { unique: true } },
+          { key: { unionid: 1 } },
+        ],
+      },
+
+      {
+        collection: 'user.alarmsetups',
+        indexes: [{ key: { user: 1 }, options: { unique: true } }],
+      },
+
+      // ============ 协议和设备类型 (3个) ============
+      {
+        collection: 'device.protocols',
+        indexes: [
+          { key: { Protocol: 1 }, options: { unique: true } },
+          { key: { Type: 1 } },
+        ],
+      },
+
+      {
+        collection: 'device.constants',
+        indexes: [{ key: { Protocol: 1 }, options: { unique: true } }],
+      },
+
+      {
+        collection: 'device.argumentalias',
+        indexes: [{ key: { mac: 1, pid: 1 }, options: { unique: true } }],
+      },
+
+      // ============ 日志集合（带 TTL）(8个) ============
+      {
+        collection: 'log.terminals',
+        indexes: [
+          { key: { TerminalMac: 1, timeStamp: -1 } },
+          { key: { timeStamp: -1 }, options: { expireAfterSeconds: 2592000 } }, // 30 天
+        ],
+      },
+
+      {
+        collection: 'log.uartterminaldatatransfinites',
+        indexes: [
+          { key: { mac: 1, pid: 1, timeStamp: -1 } },
+          { key: { timeStamp: -1 }, options: { expireAfterSeconds: 7776000 } }, // 90 天
+          { key: { isOk: 1, timeStamp: -1 } },
+        ],
+      },
+
+      {
+        collection: 'log.UserRequests',
+        indexes: [
+          { key: { user: 1, timeStamp: -1 } },
+          { key: { timeStamp: -1 }, options: { expireAfterSeconds: 7776000 } }, // 90 天
+        ],
+      },
+
+      {
+        collection: 'log.instructquerys',
+        indexes: [
+          { key: { mac: 1, timeStamp: -1 } },
+          { key: { timeStamp: -1 }, options: { expireAfterSeconds: 2592000 } }, // 30 天
+        ],
+      },
+
+      {
+        collection: 'log.usebytes',
+        indexes: [
+          { key: { mac: 1, date: 1 }, options: { unique: true } },
+          { key: { date: 1 } },
+        ],
+      },
+
+      {
+        collection: 'log.usetime',
+        indexes: [
+          { key: { mac: 1, pid: 1, timeStamp: -1 } },
+          { key: { timeStamp: -1 }, options: { expireAfterSeconds: 2592000 } }, // 30 天
+        ],
+      },
+
+      {
+        collection: 'log.wxsubscribeMessages',
+        indexes: [
+          { key: { touser: 1, timeStamp: -1 } },
+          { key: { timeStamp: -1 }, options: { expireAfterSeconds: 7776000 } }, // 90 天
+        ],
+      },
+
+      {
+        collection: 'log.innerMessages',
+        indexes: [
+          { key: { user: 1, timeStamp: -1 } },
+          { key: { timeStamp: -1 } },
+        ],
+      },
+
+      {
+        collection: 'log.dtuoperations',
+        indexes: [
+          { key: { mac: 1, operatedAt: -1 } },
+          { key: { operation: 1, operatedAt: -1 } },
+          { key: { operatedBy: 1, operatedAt: -1 } },
+          { key: { operatedAt: -1 }, options: { expireAfterSeconds: 7776000 } }, // 90 天
+        ],
+      },
+
+      // ============ 其他集合 (4个) ============
+      {
+        collection: 'node.clients',
+        indexes: [{ key: { Name: 1 }, options: { unique: true } }],
+      },
+
+      {
+        collection: 'terminal.registers',
+        indexes: [{ key: { DevMac: 1 }, options: { unique: true } }],
+      },
+
+      {
+        collection: 'dev.register',
+        indexes: [{ key: { id: 1 }, options: { unique: true } }],
+      },
+
+      {
+        collection: 'amap.loctioncaches',
+        indexes: [
+          { key: { key: 1 }, options: { unique: true } },
+          { key: { createdAt: 1 }, options: { expireAfterSeconds: 2592000 } }, // 30 天
+        ],
+      },
+    ];
+  }
+
+  /**
+   * 列出所有集合的索引
+   */
+  async listAllIndexes(): Promise<Record<string, IndexDescription[]>> {
+    const collections = await this.db.listCollections().toArray();
+    const result: Record<string, IndexDescription[]> = {};
+
+    for (const collInfo of collections) {
+      const collection = this.db.collection(collInfo.name);
+      const indexes = await collection.indexes();
+      result[collInfo.name] = indexes;
+    }
+
+    return result;
+  }
+
+  /**
+   * 分析指定集合的索引使用情况
+   */
+  async analyzeIndexUsage(collectionName: string): Promise<any[]> {
+    const collection = this.db.collection(collectionName);
+    const stats = await collection.aggregate([{ $indexStats: {} }]).toArray();
+    return stats;
+  }
+
+  /**
+   * 删除未使用的索引
+   */
+  async dropUnusedIndexes(collectionName: string, threshold: number = 0): Promise<string[]> {
+    const stats = await this.analyzeIndexUsage(collectionName);
+    const droppedIndexes: string[] = [];
+
+    for (const stat of stats) {
+      // 不删除 _id 索引
+      if (stat.name === '_id_') {
+        continue;
+      }
+
+      // 如果访问次数低于阈值，删除索引
+      if (stat.accesses.ops <= threshold) {
+        const collection = this.db.collection(collectionName);
+        await collection.dropIndex(stat.name);
+        droppedIndexes.push(stat.name);
+        console.log(`  ✓ 已删除未使用的索引: ${stat.name}`);
+      }
+    }
+
+    return droppedIndexes;
+  }
+
+  /**
+   * 获取索引统计摘要
+   */
+  async getIndexSummary(): Promise<{
+    totalCollections: number;
+    totalIndexes: number;
+    indexesByCollection: Record<string, number>;
+  }> {
+    const allIndexes = await this.listAllIndexes();
+
+    const totalCollections = Object.keys(allIndexes).length;
+    const indexesByCollection: Record<string, number> = {};
+    let totalIndexes = 0;
+
+    for (const [collection, indexes] of Object.entries(allIndexes)) {
+      indexesByCollection[collection] = indexes.length;
+      totalIndexes += indexes.length;
+    }
+
+    return {
+      totalCollections,
+      totalIndexes,
+      indexesByCollection,
+    };
+  }
+}

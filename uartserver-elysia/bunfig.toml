@@ -1,0 +1,14 @@
+[install]
+# Configure package installation
+peer = true
+optional = true
+
+[install.scopes]
+# Configure scoped registries if needed
+
+[run]
+# Configure bun run behavior
+bun = true
+
+[test]
+# Configure bun test

@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UartServer Elysia</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            margin: 0 0 20px 0;
+        }
+        .status {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+        a {
+            color: #ffd700;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 UartServer Elysia</h1>
+        <p>高性能 IoT 设备管理系统 - Powered by Elysia.js + Bun</p>
+
+        <div class="status">
+            <h3>✅ 服务状态</h3>
+            <p>✨ HTTP Server: 运行中</p>
+            <p>🔌 Socket.IO: 已启用</p>
+            <p>⚡ 运行时: Bun</p>
+        </div>
+
+        <div class="status">
+            <h3>📡 API 端点</h3>
+            <p>• <a href="/health">/health</a> - 健康检查</p>
+            <p>• <a href="/api/health">/api/health</a> - API 健康检查</p>
+            <p>• <a href="/api/terminal/cache/stats">/api/terminal/cache/stats</a> - 缓存统计</p>
+        </div>
+
+        <div class="status">
+            <h3>🚀 Eden Treaty Demo</h3>
+            <p>• <a href="/demo.html">🎯 体验端到端类型安全 API 调用</a></p>
+        </div>
+
+        <div class="status">
+            <h3>🎯 迁移进度</h3>
+            <p>Controllers: 1/12 (8.3%)</p>
+            <p>✅ Terminal Routes - 已完成</p>
+            <p>⏳ 其他 Routes - 待迁移</p>
+        </div>
+    </div>
+</body>
+</html>
