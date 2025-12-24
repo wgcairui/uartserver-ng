@@ -31,6 +31,7 @@ import { deviceTypeRoutes } from './routes/device-type.route';
 import { terminalManagementRoutes } from './routes/terminal-management.route';
 import { wechatRoutes } from './routes/wechat.route';
 import { smsRoutes } from './routes/sms.route';
+import { adminLogRoutes } from './routes/admin-log.route';
 
 // 数据库
 import { mongodb } from './database/mongodb';
@@ -132,8 +133,11 @@ const app = new Elysia()
   // ✅ SMS Routes (Phase 8.5)
   .use(smsRoutes)
 
-  // TODO: 待迁移的 Controllers (Phase 8.6+)
-  // ... 其他路由
+  // ✅ Admin Log Routes (Phase 8.6)
+  .use(adminLogRoutes)
+
+  // 迁移完成! 🎉
+  // All Phase 8 controllers migrated successfully
 
   // ============================================================================
   // 前端静态文件 (HMR 支持)
